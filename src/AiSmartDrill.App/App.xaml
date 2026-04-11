@@ -98,13 +98,42 @@
         </Style>
 
         <Style TargetType="TabControl">
-            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Background" Value="{StaticResource Brush.Background}" />
             <Setter Property="BorderBrush" Value="#334155" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="1" />
         </Style>
 
         <Style TargetType="TabItem">
             <Setter Property="Padding" Value="12,8" />
             <Setter Property="Foreground" Value="#CBD5E1" />
+            <Setter Property="Background" Value="#1E293B" />
+            <Setter Property="BorderBrush" Value="#334155" />
+            <Setter Property="BorderThickness" Value="1,1,1,0" />
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="{StaticResource Brush.Background}" />
+                    <Setter Property="Foreground" Value="{StaticResource Brush.Text}" />
+                    <Setter Property="BorderBrush" Value="#334155" />
+                </Trigger>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#334155" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        
+        <Style TargetType="GroupBox">
+            <Setter Property="Background" Value="#0F172A" />
+            <Setter Property="Foreground" Value="{StaticResource Brush.Text}" />
+            <Setter Property="BorderBrush" Value="#334155" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="8" />
+        </Style>
+        
+        <Style TargetType="Border">
+            <Setter Property="Background" Value="#0F172A" />
+            <Setter Property="BorderBrush" Value="#334155" />
+            <Setter Property="BorderThickness" Value="1" />
         </Style>
 
         <Style TargetType="DataGrid">
