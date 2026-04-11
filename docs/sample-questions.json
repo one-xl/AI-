@@ -1,0 +1,56 @@
+[
+  {
+    "type": "SingleChoice",
+    "difficulty": "Easy",
+    "stem": "C# 中值类型与引用类型的关键区别是什么？",
+    "standardAnswer": "A",
+    "optionsJson": "[\"A. 值类型通常分配在栈上，引用类型的变量保存对象引用\",\"B. 引用类型不能为 null\",\"C. 值类型一定比引用类型更快\",\"D. 二者没有区别\"]",
+    "knowledgeTags": "C#,基础,类型系统",
+    "isEnabled": true
+  },
+  {
+    "type": "TrueFalse",
+    "difficulty": "Easy",
+    "stem": "async/await 关键字会创建新的操作系统线程。",
+    "standardAnswer": "错",
+    "optionsJson": null,
+    "knowledgeTags": "C#,异步",
+    "isEnabled": true
+  },
+  {
+    "type": "SingleChoice",
+    "difficulty": "Medium",
+    "stem": "EF Core 中 DbContext 的主要职责不包括哪一项？",
+    "standardAnswer": "B",
+    "optionsJson": "[\"A. 跟踪实体变更\",\"B. 替代 SQL Server 执行查询优化器\",\"C. 生成并执行 SQL\",\"D. 配置实体映射\"]",
+    "knowledgeTags": "EFCore,数据访问",
+    "isEnabled": true
+  },
+  {
+    "type": "ShortAnswer",
+    "difficulty": "Medium",
+    "stem": "简述依赖注入（DI）在桌面应用中的两个好处。",
+    "standardAnswer": "解耦;可测试",
+    "optionsJson": null,
+    "knowledgeTags": "架构,DI",
+    "isEnabled": true
+  },
+  {
+    "type": "SingleChoice",
+    "difficulty": "Hard",
+    "stem": "WPF 数据绑定中 INotifyPropertyChanged 的作用是？",
+    "standardAnswer": "C",
+    "optionsJson": "[\"A. 提升渲染性能\",\"B. 自动生成 XAML\",\"C. 在属性变更时通知 UI 更新\",\"D. 仅用于集合绑定\"]",
+    "knowledgeTags": "WPF,MVVM",
+    "isEnabled": true
+  },
+  {
+    "type": "MultipleChoice",
+    "difficulty": "Medium",
+    "stem": "以下哪些属于关系数据库范式化的常见目标？（多选）",
+    "standardAnswer": "A,C",
+    "optionsJson": "[\"A. 减少冗余\",\"B. 提升 CPU 主频\",\"C. 避免更新异常\",\"D. 让表名更短\"]",
+    "knowledgeTags": "数据库,范式",
+    "isEnabled": true
+  }
+]

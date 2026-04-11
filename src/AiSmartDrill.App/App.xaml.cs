@@ -1,5 +1,6 @@
 ﻿using System.Windows;
 using AiSmartDrill.App.Drill.Ai;
+using AiSmartDrill.App.Drill.Import;
 using AiSmartDrill.App.Infrastructure;
 using AiSmartDrill.App.ViewModels;
 using Microsoft.EntityFrameworkCore;
@@ -47,6 +48,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IAiTutorService, LocalAiTutorService>();
         services.AddSingleton<IQuestionRecommendationService, LocalQuestionRecommendationService>();
         services.AddSingleton<IStudyPlanService, LocalStudyPlanService>();
+        services.AddSingleton<QuestionImportService>();
 
         services.AddSingleton<MainWindowViewModel>();
 

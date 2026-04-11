@@ -4,8 +4,10 @@ using System.Text;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Threading;
+using Microsoft.Win32;
 using AiSmartDrill.App.Drill.Ai;
 using AiSmartDrill.App.Drill.Grading;
+using AiSmartDrill.App.Drill.Import;
 using AiSmartDrill.App.Domain;
 using AiSmartDrill.App.Infrastructure;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -24,6 +26,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly IAiTutorService _aiTutor;
     private readonly IQuestionRecommendationService _recommendation;
     private readonly IStudyPlanService _studyPlan;
+    private readonly QuestionImportService _importService;
     private readonly ILogger<MainWindowViewModel> _logger;
 
     /// <summary>
@@ -64,12 +67,14 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         IAiTutorService aiTutor,
         IQuestionRecommendationService recommendation,
         IStudyPlanService studyPlan,
+        QuestionImportService importService,
         ILogger<MainWindowViewModel> logger)
     {
         _dbFactory = dbFactory;
         _aiTutor = aiTutor;
         _recommendation = recommendation;
         _studyPlan = studyPlan;
+        _importService = importService;
         _logger = logger;
 
         _examTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
@@ -904,4 +909,64 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         "简单" => DifficultyLevel.Easy,
         _ => null
     };
+
+    /// <summary>
+    /// 导入题库：打开文件选择对话框，选择 JSON 文件并导入。
+    /// </summary>
+    [RelayCommand]
+    private async Task ImportQuestionsAsync()
+    {
+        var dialog = new OpenFileDialog
+        {
+            Filter = "JSON 文件 (*.json)|*.json|所有文件 (*.*)|*.*",
+            Title = "选择题库导入文件",
+            Multiselect = false
+        };
+
+        var result = dialog.ShowDialog();
+        if (result != true)
+        {
+            return;
+        }
+
+        var filePath = dialog.FileName;
+        StatusMessage = $"正在导入：{Path.GetFileName(filePath)}...";
+
+        try
+        {
+            var importResult = await _importService.ImportFromJsonFileAsync(filePath).ConfigureAwait(true);
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"导入完成：成功 {importResult.SuccessCount} 题，失败 {importResult.FailCount} 题。");
+
+            if (importResult.Errors.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("错误详情：");
+                foreach (var error in importResult.Errors.Take(20))
+                {
+                    sb.AppendLine($"- {error}");
+                }
+                if (importResult.Errors.Count > 20)
+                {
+                    sb.AppendLine($"- ...（还有 {importResult.Errors.Count - 20} 条错误）");
+                }
+            }
+
+            if (importResult.SuccessCount > 0)
+            {
+                await RefreshBankAsync().ConfigureAwait(true);
+            }
+
+            StatusMessage = sb.ToString().Trim();
+            MessageBox.Show(sb.ToString(), "导入结果", MessageBoxButton.OK, importResult.SuccessCount > 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "导入题库失败");
+            var errorMsg = $"导入失败：{ex.Message}";
+            StatusMessage = errorMsg;
+            MessageBox.Show(errorMsg, "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
 }
