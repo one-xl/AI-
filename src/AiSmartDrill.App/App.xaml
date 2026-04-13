@@ -68,12 +68,6 @@
                                 <Setter TargetName="ContentSite" Property="Foreground" Value="{StaticResource Brush.Text}" />
                                 <Setter TargetName="Arrow" Property="Fill" Value="{StaticResource Brush.Text}" />
                             </Trigger>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="MainBorder" Property="Background" Value="#0B1220" />
-                                <Setter TargetName="MainBorder" Property="BorderBrush" Value="{StaticResource Brush.Accent}" />
-                                <Setter TargetName="ContentSite" Property="Foreground" Value="{StaticResource Brush.Text}" />
-                                <Setter TargetName="Arrow" Property="Fill" Value="{StaticResource Brush.Text}" />
-                            </Trigger>
                             <Trigger Property="IsDropDownOpen" Value="True">
                                 <Setter TargetName="MainBorder" Property="Background" Value="#0B1220" />
                                 <Setter TargetName="MainBorder" Property="BorderBrush" Value="{StaticResource Brush.Accent}" />
@@ -94,14 +88,6 @@
                 <Trigger Property="IsSelected" Value="True">
                     <Setter Property="Background" Value="{StaticResource Brush.Accent}" />
                     <Setter Property="Foreground" Value="#0B1220" />
-                </Trigger>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#0B1220" />
-                    <Setter Property="Foreground" Value="{StaticResource Brush.Text}" />
-                </Trigger>
-                <Trigger Property="IsHighlighted" Value="True">
-                    <Setter Property="Background" Value="#0B1220" />
-                    <Setter Property="Foreground" Value="{StaticResource Brush.Text}" />
                 </Trigger>
             </Style.Triggers>
         </Style>
@@ -160,14 +146,6 @@
                                 <Setter TargetName="Content" Property="Foreground" Value="{StaticResource Brush.Accent}" />
                                 <Setter TargetName="Border" Property="BorderBrush" Value="{StaticResource Brush.Accent}" />
                             </Trigger>
-                            <MultiTrigger>
-                                <MultiTrigger.Conditions>
-                                    <Condition Property="IsMouseOver" Value="True" />
-                                    <Condition Property="IsSelected" Value="False" />
-                                </MultiTrigger.Conditions>
-                                <Setter TargetName="Border" Property="Background" Value="#2D3748" />
-                                <Setter TargetName="Content" Property="Foreground" Value="{StaticResource Brush.Text}" />
-                            </MultiTrigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
@@ -215,10 +193,6 @@
             <Setter Property="Padding" Value="6,4" />
             <Style.Triggers>
                 <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="#2D3748" />
-                    <Setter Property="Foreground" Value="{StaticResource Brush.Text}" />
-                </Trigger>
-                <Trigger Property="IsMouseOver" Value="True">
                     <Setter Property="Background" Value="#2D3748" />
                     <Setter Property="Foreground" Value="{StaticResource Brush.Text}" />
                 </Trigger>
