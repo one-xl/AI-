@@ -16,6 +16,11 @@ public class ChatMessage
     /// 内容
     /// </summary>
     public string Content { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 推理内容
+    /// </summary>
+    public string? ReasoningContent { get; set; }
 }
 
 /// <summary>
@@ -107,6 +112,11 @@ public class ChatCompletionResponse
     public string Model { get; set; } = string.Empty;
 
     /// <summary>
+    /// 服务等级
+    /// </summary>
+    public string? ServiceTier { get; set; }
+
+    /// <summary>
     /// 选择
     /// </summary>
     public List<Choice> Choices { get; set; } = new List<Choice>();
@@ -136,6 +146,11 @@ public class Choice
     /// 完成原因
     /// </summary>
     public string FinishReason { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 对数概率
+    /// </summary>
+    public object? Logprobs { get; set; }
 
     /// <summary>
     /// 工具调用
@@ -199,6 +214,38 @@ public class Usage
     /// 总令牌
     /// </summary>
     public int TotalTokens { get; set; }
+
+    /// <summary>
+    /// 提示令牌详情
+    /// </summary>
+    public PromptTokensDetails? PromptTokensDetails { get; set; }
+
+    /// <summary>
+    /// 完成令牌详情
+    /// </summary>
+    public CompletionTokensDetails? CompletionTokensDetails { get; set; }
+}
+
+/// <summary>
+/// 提示令牌详情
+/// </summary>
+public class PromptTokensDetails
+{
+    /// <summary>
+    /// 缓存令牌
+    /// </summary>
+    public int CachedTokens { get; set; }
+}
+
+/// <summary>
+/// 完成令牌详情
+/// </summary>
+public class CompletionTokensDetails
+{
+    /// <summary>
+    /// 推理令牌
+    /// </summary>
+    public int ReasoningTokens { get; set; }
 }
 
 /// <summary>
