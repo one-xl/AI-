@@ -615,10 +615,43 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             var analyzed = await _aiTutor.AnalyzeWrongQuestionsAsync(wrongInsights).ConfigureAwait(true);
             AiOutputText = FormatAiInsights(analyzed);
+            
+            // 询问用户是否推荐相似题目和生成学习计划
+            var dialogResult = MessageBox.Show("错题解析完成，是否推荐相似题目并生成学习计划？", "AI 分析", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (dialogResult == MessageBoxResult.Yes)
+            {
+                // 推荐相似题目
+                var recommendation = await _recommendation.RecommendAsync(userId).ConfigureAwait(true);
+                _recommendedQuestionIds = recommendation.RecommendedQuestionIds.ToList();
+                
+                var sb = new StringBuilder(AiOutputText);
+                sb.AppendLine();
+                sb.AppendLine("===== 题目推荐 =====");
+                sb.AppendLine(recommendation.Rationale);
+                sb.AppendLine("推荐题目 Id：");
+                sb.AppendLine(string.Join(", ", recommendation.RecommendedQuestionIds));
+                AiOutputText = sb.ToString();
+                
+                // 生成学习计划
+                await GenerateStudyPlanAsync().ConfigureAwait(true);
+                
+                // 询问用户是否开始刷题
+                if (_recommendedQuestionIds.Count > 0)
+                {
+                    await ShowRecommendationDialogAsync().ConfigureAwait(true);
+                }
+            }
         }
         else
         {
             AiOutputText = "本次没有错题，AI 解析跳过。";
+            
+            // 询问用户是否生成学习计划
+            var dialogResult = MessageBox.Show("本次没有错题，是否生成学习计划？", "AI 分析", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (dialogResult == MessageBoxResult.Yes)
+            {
+                await GenerateStudyPlanAsync().ConfigureAwait(true);
+            }
         }
 
         _examQuestions.Clear();
@@ -671,7 +704,25 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             StatusMessage = "AI 推荐已生成。";
             
             // 弹出提示对话框，询问用户是否开始刷题
-            await ShowRecommendationDialogAsync().ConfigureAwait(true);
+            var dialogResult = MessageBox.Show($"AI 已推荐 {_recommendedQuestionIds.Count} 道题目，是否开始刷题？\n\n同时生成个性化学习计划？", "AI 推荐", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+            
+            if (dialogResult == MessageBoxResult.Yes)
+            {
+                // 开始刷题
+                await StartExamWithRecommendedQuestionsAsync().ConfigureAwait(true);
+                // 生成学习计划
+                await GenerateStudyPlanAsync().ConfigureAwait(true);
+            }
+            else if (dialogResult == MessageBoxResult.No)
+            {
+                // 只开始刷题
+                await StartExamWithRecommendedQuestionsAsync().ConfigureAwait(true);
+            }
+            else if (dialogResult == MessageBoxResult.Cancel)
+            {
+                // 只生成学习计划
+                await GenerateStudyPlanAsync().ConfigureAwait(true);
+            }
         }
         catch (Exception ex)
         {
@@ -801,6 +852,120 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         StudyPlanText =
             $"{plan.Title}\r\n阶段：{plan.PhaseDays} 天；每日：{plan.DailyQuestionQuota} 题。\r\n重点：{string.Join("、", plan.FocusKnowledgeTags)}\r\n说明：{plan.Notes}";
         StatusMessage = "学习计划已生成。";
+    }
+
+    /// <summary>
+    /// 触发AI综合分析，包括错题解析、题目推荐和学习计划生成。
+    /// </summary>
+    [RelayCommand]
+    private async Task GenerateComprehensiveAiAnalysisAsync()
+    {
+        StatusMessage = "开始AI综合分析...";
+        
+        try
+        {
+            // 1. 首先获取用户的错题记录
+            await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(true);
+            var userId = DatabaseInitializer.DemoUserId;
+            
+            var wrongEntries = await db.WrongBookEntries.AsNoTracking()
+                .Where(w => w.UserId == userId)
+                .Join(db.Questions.AsNoTracking(), w => w.QuestionId, q => q.Id, (w, q) => new { w, q })
+                .OrderByDescending(x => x.w.LastWrongAtUtc)
+                .Take(5) // 只分析最近的5道错题
+                .ToListAsync()
+                .ConfigureAwait(true);
+            
+            // 2. 解析错题
+            if (wrongEntries.Count > 0)
+            {
+                var wrongInsights = wrongEntries.Select(x => new WrongQuestionInsightDto
+                {
+                    QuestionId = x.q.Id,
+                    Type = x.q.Type,
+                    StemSummary = x.q.Stem.Length > 48 ? x.q.Stem[..48] + "…" : x.q.Stem,
+                    UserAnswer = string.Empty, // 这里我们没有存储用户的具体答案，所以留空
+                    StandardAnswer = x.q.StandardAnswer,
+                    RootCause = string.Empty,
+                    SolutionHints = string.Empty
+                }).ToList();
+                
+                var analyzed = await _aiTutor.AnalyzeWrongQuestionsAsync(wrongInsights).ConfigureAwait(true);
+                AiOutputText = FormatAiInsights(analyzed);
+                StatusMessage = "错题解析完成，正在推荐题目...";
+            }
+            else
+            {
+                AiOutputText = "暂无错题记录，跳过错题解析。";
+                StatusMessage = "正在推荐题目...";
+            }
+            
+            // 3. 推荐题目
+            var recommendation = await _recommendation.RecommendAsync(userId).ConfigureAwait(true);
+            _recommendedQuestionIds = recommendation.RecommendedQuestionIds.ToList();
+            
+            var sb = new StringBuilder(AiOutputText);
+            sb.AppendLine();
+            sb.AppendLine("===== 题目推荐 =====");
+            sb.AppendLine(recommendation.Rationale);
+            sb.AppendLine("推荐题目 Id：");
+            sb.AppendLine(string.Join(", ", recommendation.RecommendedQuestionIds));
+            AiOutputText = sb.ToString();
+            StatusMessage = "题目推荐完成，正在生成学习计划...";
+            
+            // 4. 生成学习计划
+            var total = await db.AnswerRecords.CountAsync(x => x.UserId == userId).ConfigureAwait(true);
+            var correct = await db.AnswerRecords.CountAsync(x => x.UserId == userId && x.IsCorrect).ConfigureAwait(true);
+            var wrongCount = await db.WrongBookEntries.CountAsync(x => x.UserId == userId).ConfigureAwait(true);
+
+            var weakTags = await db.WrongBookEntries.AsNoTracking()
+                .Where(w => w.UserId == userId)
+                .Join(db.Questions.AsNoTracking(), w => w.QuestionId, q => q.Id, (_, q) => q.KnowledgeTags)
+                .ToListAsync()
+                .ConfigureAwait(true);
+
+            var tagHistogram = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var tags in weakTags)
+            {
+                foreach (var t in tags.Split(new[] { ',', '，', ';', '；' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    tagHistogram[t] = tagHistogram.TryGetValue(t, out var c) ? c + 1 : 1;
+                }
+            }
+
+            var topTags = tagHistogram
+                .OrderByDescending(kv => kv.Value)
+                .Take(5)
+                .Select(kv => kv.Key)
+                .ToList();
+
+            var summary = new UserPerformanceSummary
+            {
+                UserId = userId,
+                TotalAttempts = total,
+                CorrectAttempts = correct,
+                WrongBookCount = wrongCount,
+                WeakTags = topTags
+            };
+
+            var plan = await _studyPlan.GeneratePlanAsync(summary).ConfigureAwait(true);
+            StudyPlanText =
+                $"{plan.Title}\r\n阶段：{plan.PhaseDays} 天；每日：{plan.DailyQuestionQuota} 题。\r\n重点：{string.Join("、", plan.FocusKnowledgeTags)}\r\n说明：{plan.Notes}";
+            
+            // 5. 询问用户是否开始刷题
+            if (_recommendedQuestionIds.Count > 0)
+            {
+                await ShowRecommendationDialogAsync().ConfigureAwait(true);
+            }
+            
+            StatusMessage = "AI综合分析完成。";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "AI综合分析失败");
+            StatusMessage = "AI综合分析失败：" + ex.Message;
+            MessageBox.Show("AI综合分析失败：" + ex.Message, "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     // 考试过程中保存每题作答（题号 -> 答案文本）。
