@@ -702,33 +702,65 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
 
         if (wrongInsights.Count > 0)
         {
-            var analyzed = await _aiTutor.AnalyzeWrongQuestionsAsync(wrongInsights).ConfigureAwait(false);
-            AiOutputText = FormatAiInsights(analyzed);
-            
-            // 询问用户是否推荐相似题目和生成学习计划
-            var dialogResult = MessageBox.Show("错题解析完成，是否推荐相似题目并生成学习计划？", "AI 分析", MessageBoxButton.YesNo, MessageBoxImage.Question);
-            if (dialogResult == MessageBoxResult.Yes)
+            try
             {
-                // 推荐相似题目
-                var recommendation = await _recommendation.RecommendAsync(userId).ConfigureAwait(false);
-                _recommendedQuestionIds = recommendation.RecommendedQuestionIds.ToList();
+                var analyzed = await _aiTutor.AnalyzeWrongQuestionsAsync(wrongInsights).ConfigureAwait(false);
+                AiOutputText = FormatAiInsights(analyzed);
                 
-                var sb = new StringBuilder(AiOutputText);
-                sb.AppendLine();
-                sb.AppendLine("===== 题目推荐 =====");
-                sb.AppendLine(recommendation.Rationale);
-                sb.AppendLine("推荐题目 Id：");
-                sb.AppendLine(string.Join(", ", recommendation.RecommendedQuestionIds));
-                AiOutputText = sb.ToString();
-                
-                // 生成学习计划
-                await GenerateStudyPlanAsync().ConfigureAwait(false);
-                
-                // 询问用户是否开始刷题
-                if (_recommendedQuestionIds.Count > 0)
+                // 询问用户是否推荐相似题目和生成学习计划
+                var dialogResult = MessageBox.Show("错题解析完成，是否推荐相似题目并生成学习计划？", "AI 分析", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                if (dialogResult == MessageBoxResult.Yes)
                 {
-                    await ShowRecommendationDialogAsync().ConfigureAwait(false);
+                    try
+                    {
+                        // 推荐相似题目
+                        var recommendation = await _recommendation.RecommendAsync(userId).ConfigureAwait(false);
+                        _recommendedQuestionIds = recommendation.RecommendedQuestionIds.ToList();
+                        
+                        var sb = new StringBuilder(AiOutputText);
+                        sb.AppendLine();
+                        sb.AppendLine("===== 题目推荐 =====");
+                        sb.AppendLine(recommendation.Rationale);
+                        sb.AppendLine("推荐题目 Id：");
+                        sb.AppendLine(string.Join(", ", recommendation.RecommendedQuestionIds));
+                        AiOutputText = sb.ToString();
+                        
+                        // 生成学习计划
+                        await GenerateStudyPlanAsync().ConfigureAwait(false);
+                        
+                        // 询问用户是否开始刷题
+                        if (_recommendedQuestionIds.Count > 0)
+                        {
+                            await ShowRecommendationDialogAsync().ConfigureAwait(false);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "AI 推荐失败");
+                        var sb = new StringBuilder(AiOutputText);
+                        sb.AppendLine();
+                        sb.AppendLine("===== 题目推荐失败 =====");
+                        sb.AppendLine("错误原因：" + ex.Message);
+                        sb.AppendLine("可能的解决方法：");
+                        sb.AppendLine("1. 检查网络连接是否正常");
+                        sb.AppendLine("2. 验证 API Key 是否正确");
+                        sb.AppendLine("3. 确认 API 端点配置是否正确");
+                        sb.AppendLine("4. 稍后重试");
+                        AiOutputText = sb.ToString();
+                        StatusMessage = "AI 推荐失败。";
+                    }
                 }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "AI 错题解析失败");
+                AiOutputText = "AI 错题解析失败：" + ex.Message;
+                AiOutputText += "\n可能的解决方法：";
+                AiOutputText += "\n1. 检查网络连接是否正常";
+                AiOutputText += "\n2. 验证 API Key 是否正确";
+                AiOutputText += "\n3. 确认 API 端点配置是否正确";
+                AiOutputText += "\n4. 稍后重试";
+                StatusMessage = "AI 错题解析失败。";
             }
         }
         else
@@ -804,15 +836,14 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             
             if (startExamDialog == MessageBoxResult.Yes)
             {
-                // 开始刷题
+                // 开始刷题并生成学习计划
                 await StartExamWithRecommendedQuestionsAsync().ConfigureAwait(false);
-                // 生成学习计划
                 await GenerateStudyPlanAsync().ConfigureAwait(false);
             }
             else if (startExamDialog == MessageBoxResult.No)
             {
-                // 只开始刷题
-                await StartExamWithRecommendedQuestionsAsync().ConfigureAwait(false);
+                // 不做任何操作
+                StatusMessage = "已取消开始刷题。";
             }
             else if (startExamDialog == MessageBoxResult.Cancel)
             {
@@ -915,47 +946,61 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(false);
-        var userId = DatabaseInitializer.DemoUserId;
-
-        var total = await db.AnswerRecords.CountAsync(x => x.UserId == userId).ConfigureAwait(false);
-        var correct = await db.AnswerRecords.CountAsync(x => x.UserId == userId && x.IsCorrect).ConfigureAwait(false);
-        var wrongCount = await db.WrongBookEntries.CountAsync(x => x.UserId == userId).ConfigureAwait(false);
-
-        var weakTags = await db.WrongBookEntries.AsNoTracking()
-            .Where(w => w.UserId == userId)
-            .Join(db.Questions.AsNoTracking(), w => w.QuestionId, q => q.Id, (_, q) => q.KnowledgeTags)
-            .ToListAsync()
-            .ConfigureAwait(false);
-
-        var tagHistogram = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (var tags in weakTags)
+        try
         {
-            foreach (var t in tags.Split(new[] { ',', '，', ';', '；' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(false);
+            var userId = DatabaseInitializer.DemoUserId;
+
+            var total = await db.AnswerRecords.CountAsync(x => x.UserId == userId).ConfigureAwait(false);
+            var correct = await db.AnswerRecords.CountAsync(x => x.UserId == userId && x.IsCorrect).ConfigureAwait(false);
+            var wrongCount = await db.WrongBookEntries.CountAsync(x => x.UserId == userId).ConfigureAwait(false);
+
+            var weakTags = await db.WrongBookEntries.AsNoTracking()
+                .Where(w => w.UserId == userId)
+                .Join(db.Questions.AsNoTracking(), w => w.QuestionId, q => q.Id, (_, q) => q.KnowledgeTags)
+                .ToListAsync()
+                .ConfigureAwait(false);
+
+            var tagHistogram = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var tags in weakTags)
             {
-                tagHistogram[t] = tagHistogram.TryGetValue(t, out var c) ? c + 1 : 1;
+                foreach (var t in tags.Split(new[] { ',', '，', ';', '；' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    tagHistogram[t] = tagHistogram.TryGetValue(t, out var c) ? c + 1 : 1;
+                }
             }
+
+            var top = tagHistogram
+                .OrderByDescending(kv => kv.Value)
+                .Take(5)
+                .Select(kv => kv.Key)
+                .ToList();
+
+            var summary = new UserPerformanceSummary
+            {
+                UserId = userId,
+                TotalAttempts = total,
+                CorrectAttempts = correct,
+                WrongBookCount = wrongCount,
+                WeakTags = top
+            };
+
+            var plan = await _studyPlan.GeneratePlanAsync(summary).ConfigureAwait(false);
+            StudyPlanText =
+                $"{plan.Title}\r\n阶段：{plan.PhaseDays} 天；每日：{plan.DailyQuestionQuota} 题。\r\n重点：{string.Join("、", plan.FocusKnowledgeTags)}\r\n说明：{plan.Notes}";
+            StatusMessage = "学习计划已生成。";
         }
-
-        var top = tagHistogram
-            .OrderByDescending(kv => kv.Value)
-            .Take(5)
-            .Select(kv => kv.Key)
-            .ToList();
-
-        var summary = new UserPerformanceSummary
+        catch (Exception ex)
         {
-            UserId = userId,
-            TotalAttempts = total,
-            CorrectAttempts = correct,
-            WrongBookCount = wrongCount,
-            WeakTags = top
-        };
-
-        var plan = await _studyPlan.GeneratePlanAsync(summary).ConfigureAwait(false);
-        StudyPlanText =
-            $"{plan.Title}\r\n阶段：{plan.PhaseDays} 天；每日：{plan.DailyQuestionQuota} 题。\r\n重点：{string.Join("、", plan.FocusKnowledgeTags)}\r\n说明：{plan.Notes}";
-        StatusMessage = "学习计划已生成。";
+            _logger.LogError(ex, "AI 学习计划生成失败");
+            StudyPlanText = "AI 学习计划生成失败：" + ex.Message;
+            StudyPlanText += "\n可能的解决方法：";
+            StudyPlanText += "\n1. 检查网络连接是否正常";
+            StudyPlanText += "\n2. 验证 API Key 是否正确";
+            StudyPlanText += "\n3. 确认 API 端点配置是否正确";
+            StudyPlanText += "\n4. 稍后重试";
+            StatusMessage = "AI 学习计划生成失败。";
+        }
     }
 
     /// <summary>
@@ -990,20 +1035,34 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             // 2. 解析错题
             if (wrongEntries.Count > 0)
             {
-                var wrongInsights = wrongEntries.Select(x => new WrongQuestionInsightDto
+                try
                 {
-                    QuestionId = x.q.Id,
-                    Type = x.q.Type,
-                    StemSummary = x.q.Stem.Length > 48 ? x.q.Stem[..48] + "…" : x.q.Stem,
-                    UserAnswer = string.Empty, // 这里我们没有存储用户的具体答案，所以留空
-                    StandardAnswer = x.q.StandardAnswer,
-                    RootCause = string.Empty,
-                    SolutionHints = string.Empty
-                }).ToList();
-                
-                var analyzed = await _aiTutor.AnalyzeWrongQuestionsAsync(wrongInsights).ConfigureAwait(false);
-                AiOutputText = FormatAiInsights(analyzed);
-                StatusMessage = "错题解析完成，正在推荐题目...";
+                    var wrongInsights = wrongEntries.Select(x => new WrongQuestionInsightDto
+                    {
+                        QuestionId = x.q.Id,
+                        Type = x.q.Type,
+                        StemSummary = x.q.Stem.Length > 48 ? x.q.Stem[..48] + "…" : x.q.Stem,
+                        UserAnswer = string.Empty, // 这里我们没有存储用户的具体答案，所以留空
+                        StandardAnswer = x.q.StandardAnswer,
+                        RootCause = string.Empty,
+                        SolutionHints = string.Empty
+                    }).ToList();
+                    
+                    var analyzed = await _aiTutor.AnalyzeWrongQuestionsAsync(wrongInsights).ConfigureAwait(false);
+                    AiOutputText = FormatAiInsights(analyzed);
+                    StatusMessage = "错题解析完成，正在推荐题目...";
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "AI 错题解析失败");
+                    AiOutputText = "AI 错题解析失败：" + ex.Message;
+                    AiOutputText += "\n可能的解决方法：";
+                    AiOutputText += "\n1. 检查网络连接是否正常";
+                    AiOutputText += "\n2. 验证 API Key 是否正确";
+                    AiOutputText += "\n3. 确认 API 端点配置是否正确";
+                    AiOutputText += "\n4. 稍后重试";
+                    StatusMessage = "错题解析失败，正在推荐题目...";
+                }
             }
             else
             {
@@ -1012,56 +1071,87 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             }
             
             // 3. 推荐题目
-            var recommendation = await _recommendation.RecommendAsync(userId).ConfigureAwait(false);
-            _recommendedQuestionIds = recommendation.RecommendedQuestionIds.ToList();
-            
-            var sb = new StringBuilder(AiOutputText);
-            sb.AppendLine();
-            sb.AppendLine("===== 题目推荐 =====");
-            sb.AppendLine(recommendation.Rationale);
-            sb.AppendLine("推荐题目 Id：");
-            sb.AppendLine(string.Join(", ", recommendation.RecommendedQuestionIds));
-            AiOutputText = sb.ToString();
-            StatusMessage = "题目推荐完成，正在生成学习计划...";
+            try
+            {
+                var recommendation = await _recommendation.RecommendAsync(userId).ConfigureAwait(false);
+                _recommendedQuestionIds = recommendation.RecommendedQuestionIds.ToList();
+                
+                var sb = new StringBuilder(AiOutputText);
+                sb.AppendLine();
+                sb.AppendLine("===== 题目推荐 =====");
+                sb.AppendLine(recommendation.Rationale);
+                sb.AppendLine("推荐题目 Id：");
+                sb.AppendLine(string.Join(", ", recommendation.RecommendedQuestionIds));
+                AiOutputText = sb.ToString();
+                StatusMessage = "题目推荐完成，正在生成学习计划...";
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "AI 推荐失败");
+                var sb = new StringBuilder(AiOutputText);
+                sb.AppendLine();
+                sb.AppendLine("===== 题目推荐失败 =====");
+                sb.AppendLine("错误原因：" + ex.Message);
+                sb.AppendLine("可能的解决方法：");
+                sb.AppendLine("1. 检查网络连接是否正常");
+                sb.AppendLine("2. 验证 API Key 是否正确");
+                sb.AppendLine("3. 确认 API 端点配置是否正确");
+                sb.AppendLine("4. 稍后重试");
+                AiOutputText = sb.ToString();
+                StatusMessage = "题目推荐失败，正在生成学习计划...";
+            }
             
             // 4. 生成学习计划
-            var total = await db.AnswerRecords.CountAsync(x => x.UserId == userId).ConfigureAwait(false);
-            var correct = await db.AnswerRecords.CountAsync(x => x.UserId == userId && x.IsCorrect).ConfigureAwait(false);
-            var wrongCount = await db.WrongBookEntries.CountAsync(x => x.UserId == userId).ConfigureAwait(false);
-
-            var weakTags = await db.WrongBookEntries.AsNoTracking()
-                .Where(w => w.UserId == userId)
-                .Join(db.Questions.AsNoTracking(), w => w.QuestionId, q => q.Id, (_, q) => q.KnowledgeTags)
-                .ToListAsync()
-                .ConfigureAwait(false);
-
-            var tagHistogram = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            foreach (var tags in weakTags)
+            try
             {
-                foreach (var t in tags.Split(new[] { ',', '，', ';', '；' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                var total = await db.AnswerRecords.CountAsync(x => x.UserId == userId).ConfigureAwait(false);
+                var correct = await db.AnswerRecords.CountAsync(x => x.UserId == userId && x.IsCorrect).ConfigureAwait(false);
+                var wrongCount = await db.WrongBookEntries.CountAsync(x => x.UserId == userId).ConfigureAwait(false);
+
+                var weakTags = await db.WrongBookEntries.AsNoTracking()
+                    .Where(w => w.UserId == userId)
+                    .Join(db.Questions.AsNoTracking(), w => w.QuestionId, q => q.Id, (_, q) => q.KnowledgeTags)
+                    .ToListAsync()
+                    .ConfigureAwait(false);
+
+                var tagHistogram = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                foreach (var tags in weakTags)
                 {
-                    tagHistogram[t] = tagHistogram.TryGetValue(t, out var c) ? c + 1 : 1;
+                    foreach (var t in tags.Split(new[] { ',', '，', ';', '；' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    {
+                        tagHistogram[t] = tagHistogram.TryGetValue(t, out var c) ? c + 1 : 1;
+                    }
                 }
+
+                var topTags = tagHistogram
+                    .OrderByDescending(kv => kv.Value)
+                    .Take(5)
+                    .Select(kv => kv.Key)
+                    .ToList();
+
+                var summary = new UserPerformanceSummary
+                {
+                    UserId = userId,
+                    TotalAttempts = total,
+                    CorrectAttempts = correct,
+                    WrongBookCount = wrongCount,
+                    WeakTags = topTags
+                };
+
+                var plan = await _studyPlan.GeneratePlanAsync(summary).ConfigureAwait(false);
+                StudyPlanText =
+                    $"{plan.Title}\r\n阶段：{plan.PhaseDays} 天；每日：{plan.DailyQuestionQuota} 题。\r\n重点：{string.Join("、", plan.FocusKnowledgeTags)}\r\n说明：{plan.Notes}";
             }
-
-            var topTags = tagHistogram
-                .OrderByDescending(kv => kv.Value)
-                .Take(5)
-                .Select(kv => kv.Key)
-                .ToList();
-
-            var summary = new UserPerformanceSummary
+            catch (Exception ex)
             {
-                UserId = userId,
-                TotalAttempts = total,
-                CorrectAttempts = correct,
-                WrongBookCount = wrongCount,
-                WeakTags = topTags
-            };
-
-            var plan = await _studyPlan.GeneratePlanAsync(summary).ConfigureAwait(false);
-            StudyPlanText =
-                $"{plan.Title}\r\n阶段：{plan.PhaseDays} 天；每日：{plan.DailyQuestionQuota} 题。\r\n重点：{string.Join("、", plan.FocusKnowledgeTags)}\r\n说明：{plan.Notes}";
+                _logger.LogError(ex, "AI 学习计划生成失败");
+                StudyPlanText = "AI 学习计划生成失败：" + ex.Message;
+                StudyPlanText += "\n可能的解决方法：";
+                StudyPlanText += "\n1. 检查网络连接是否正常";
+                StudyPlanText += "\n2. 验证 API Key 是否正确";
+                StudyPlanText += "\n3. 确认 API 端点配置是否正确";
+                StudyPlanText += "\n4. 稍后重试";
+            }
             
             // 5. 询问用户是否开始刷题
             if (_recommendedQuestionIds.Count > 0)
@@ -1183,7 +1273,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     private static string FormatAiInsights(IReadOnlyList<WrongQuestionInsightDto> items)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("AI 错题解析（占位服务输出）");
+        sb.AppendLine("AI 错题解析");
         foreach (var it in items)
         {
             sb.AppendLine("----");
