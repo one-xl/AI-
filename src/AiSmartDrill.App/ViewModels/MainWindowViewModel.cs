@@ -332,30 +332,39 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task RefreshBankAsync()
     {
-        await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(true);
-        var q = db.Questions.AsNoTracking().Where(x => x.IsEnabled);
-
-        var type = MapUiToTypeOrNull(SelectedTypeFilter);
-        if (type is not null)
+        try
         {
-            q = q.Where(x => x.Type == type);
-        }
+            await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(false);
+            var q = db.Questions.AsNoTracking().Where(x => x.IsEnabled);
 
-        var diff = MapUiToDifficultyOrNull(SelectedDifficultyFilter);
-        if (diff is not null)
+            var type = MapUiToTypeOrNull(SelectedTypeFilter);
+            if (type is not null)
+            {
+                q = q.Where(x => x.Type == type);
+            }
+
+            var diff = MapUiToDifficultyOrNull(SelectedDifficultyFilter);
+            if (diff is not null)
+            {
+                q = q.Where(x => x.Difficulty == diff);
+            }
+
+            var domain = MapUiToDomainOrNull(SelectedDomainFilter);
+            if (domain is not null)
+            {
+                q = q.Where(x => x.Domain == domain);
+            }
+
+            var list = await q.OrderByDescending(x => x.Id).ToListAsync().ConfigureAwait(false);
+            
+            BankQuestions = new ObservableCollection<Question>(list);
+            StatusMessage = $"题库已刷新：{list.Count} 条（筛选：{SelectedTypeFilter} + {SelectedDifficultyFilter} + {SelectedDomainFilter}）。";
+        }
+        catch (Exception ex)
         {
-            q = q.Where(x => x.Difficulty == diff);
+            _logger.LogError(ex, "刷新题库失败");
+            StatusMessage = "刷新题库失败：" + ex.Message;
         }
-
-        var domain = MapUiToDomainOrNull(SelectedDomainFilter);
-        if (domain is not null)
-        {
-            q = q.Where(x => x.Domain == domain);
-        }
-
-        var list = await q.OrderByDescending(x => x.Id).ToListAsync().ConfigureAwait(true);
-        BankQuestions = new ObservableCollection<Question>(list);
-        StatusMessage = $"题库已刷新：{list.Count} 条（筛选：{SelectedTypeFilter} + {SelectedDifficultyFilter} + {SelectedDomainFilter}）。";
     }
 
     /// <summary>
@@ -370,7 +379,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(true);
+        await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(false);
         var type = MapUiToType(EditorType);
         var diff = MapUiToDifficulty(EditorDifficulty);
         var domain = MapUiToDomain(EditorDomain);
@@ -392,7 +401,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         }
         else
         {
-            var entity = await db.Questions.FirstOrDefaultAsync(x => x.Id == SelectedBankQuestion.Id).ConfigureAwait(true);
+            var entity = await db.Questions.FirstOrDefaultAsync(x => x.Id == SelectedBankQuestion.Id).ConfigureAwait(false);
             if (entity is null)
             {
                 StatusMessage = "未找到要更新的题目。";
@@ -408,9 +417,9 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             entity.Domain = domain;
         }
 
-        await db.SaveChangesAsync().ConfigureAwait(true);
+        await db.SaveChangesAsync().ConfigureAwait(false);
         StatusMessage = "题目已保存。";
-        await RefreshBankAsync().ConfigureAwait(true);
+        await RefreshBankAsync().ConfigureAwait(false);
     }
 
     /// <summary>
@@ -442,8 +451,8 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(true);
-        var entity = await db.Questions.FirstOrDefaultAsync(x => x.Id == SelectedBankQuestion.Id).ConfigureAwait(true);
+        await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(false);
+        var entity = await db.Questions.FirstOrDefaultAsync(x => x.Id == SelectedBankQuestion.Id).ConfigureAwait(false);
         if (entity is null)
         {
             StatusMessage = "题目不存在。";
@@ -451,10 +460,10 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         db.Questions.Remove(entity);
-        await db.SaveChangesAsync().ConfigureAwait(true);
+        await db.SaveChangesAsync().ConfigureAwait(false);
         SelectedBankQuestion = null;
         StatusMessage = "题目已删除。";
-        await RefreshBankAsync().ConfigureAwait(true);
+        await RefreshBankAsync().ConfigureAwait(false);
     }
 
     /// <summary>
@@ -463,7 +472,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task StartExamAsync()
     {
-        await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(true);
+        await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(false);
         var q = db.Questions.AsNoTracking().Where(x => x.IsEnabled);
 
         var type = MapUiToTypeOrNull(SelectedTypeFilter);
@@ -478,7 +487,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             q = q.Where(x => x.Difficulty == diff);
         }
 
-        var pool = await q.ToListAsync().ConfigureAwait(true);
+        var pool = await q.ToListAsync().ConfigureAwait(false);
         if (pool.Count == 0)
         {
             StatusMessage = "题库筛选结果为空，无法组卷。";
@@ -510,12 +519,12 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task StartWrongBookPracticeAsync()
     {
-        await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(true);
+        await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(false);
         var wrongIds = await db.WrongBookEntries.AsNoTracking()
             .Where(w => w.UserId == DatabaseInitializer.DemoUserId)
             .Select(w => w.QuestionId)
             .ToListAsync()
-            .ConfigureAwait(true);
+            .ConfigureAwait(false);
 
         if (wrongIds.Count == 0)
         {
@@ -526,7 +535,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         var qs = await db.Questions.AsNoTracking()
             .Where(q => q.IsEnabled && wrongIds.Contains(q.Id))
             .ToListAsync()
-            .ConfigureAwait(true);
+            .ConfigureAwait(false);
 
         var rng = new Random();
         var paper = qs.OrderBy(_ => rng.Next()).Take(Math.Clamp(ExamQuestionCount, 1, 50)).ToList();
@@ -630,7 +639,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         IsExamRunning = false;
         StoreCurrentAnswerSnapshot();
 
-        await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(true);
+        await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(false);
         var userId = DatabaseInitializer.DemoUserId;
 
         var correct = 0;
@@ -662,7 +671,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
 
             if (!ok)
             {
-                await UpsertWrongBookAsync(db, userId, q.Id).ConfigureAwait(true);
+                await UpsertWrongBookAsync(db, userId, q.Id).ConfigureAwait(false);
 
                 wrongInsights.Add(new WrongQuestionInsightDto
                 {
@@ -677,14 +686,14 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             }
         }
 
-        await db.SaveChangesAsync().ConfigureAwait(true);
+        await db.SaveChangesAsync().ConfigureAwait(false);
 
         LastScoreText = $"{correct}/{_examQuestions.Count}";
         StatusMessage = $"交卷完成：{LastScoreText}。错题数：{wrongInsights.Count}。";
 
         if (wrongInsights.Count > 0)
         {
-            var analyzed = await _aiTutor.AnalyzeWrongQuestionsAsync(wrongInsights).ConfigureAwait(true);
+            var analyzed = await _aiTutor.AnalyzeWrongQuestionsAsync(wrongInsights).ConfigureAwait(false);
             AiOutputText = FormatAiInsights(analyzed);
             
             // 询问用户是否推荐相似题目和生成学习计划
@@ -692,7 +701,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             if (dialogResult == MessageBoxResult.Yes)
             {
                 // 推荐相似题目
-                var recommendation = await _recommendation.RecommendAsync(userId).ConfigureAwait(true);
+                var recommendation = await _recommendation.RecommendAsync(userId).ConfigureAwait(false);
                 _recommendedQuestionIds = recommendation.RecommendedQuestionIds.ToList();
                 
                 var sb = new StringBuilder(AiOutputText);
@@ -704,12 +713,12 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
                 AiOutputText = sb.ToString();
                 
                 // 生成学习计划
-                await GenerateStudyPlanAsync().ConfigureAwait(true);
+                await GenerateStudyPlanAsync().ConfigureAwait(false);
                 
                 // 询问用户是否开始刷题
                 if (_recommendedQuestionIds.Count > 0)
                 {
-                    await ShowRecommendationDialogAsync().ConfigureAwait(true);
+                    await ShowRecommendationDialogAsync().ConfigureAwait(false);
                 }
             }
         }
@@ -721,7 +730,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             var dialogResult = MessageBox.Show("本次没有错题，是否生成学习计划？", "AI 分析", MessageBoxButton.YesNo, MessageBoxImage.Question);
             if (dialogResult == MessageBoxResult.Yes)
             {
-                await GenerateStudyPlanAsync().ConfigureAwait(true);
+                await GenerateStudyPlanAsync().ConfigureAwait(false);
             }
         }
 
@@ -740,13 +749,13 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task RefreshWrongBookAsync()
     {
-        await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(true);
+        await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(false);
         var rows = await db.WrongBookEntries.AsNoTracking()
             .Where(w => w.UserId == DatabaseInitializer.DemoUserId)
             .Join(db.Questions.AsNoTracking(), w => w.QuestionId, q => q.Id, (w, q) => new { w.WrongCount, w.LastWrongAtUtc, q.Stem, q.Type, q.Difficulty })
             .OrderByDescending(x => x.LastWrongAtUtc)
             .ToListAsync()
-            .ConfigureAwait(true);
+            .ConfigureAwait(false);
 
         var lines = rows.Select(x =>
                 $"[{x.LastWrongAtUtc:yyyy-MM-dd}] {MapTypeToUi(x.Type)} / {MapDifficultyToUi(x.Difficulty)} / 错{x.WrongCount}次 — {x.Stem}")
@@ -771,7 +780,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            var dto = await _recommendation.RecommendAsync(DatabaseInitializer.DemoUserId).ConfigureAwait(true);
+            var dto = await _recommendation.RecommendAsync(DatabaseInitializer.DemoUserId).ConfigureAwait(false);
             _recommendedQuestionIds = dto.RecommendedQuestionIds.ToList();
             
             var sb = new StringBuilder();
@@ -787,19 +796,19 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             if (startExamDialog == MessageBoxResult.Yes)
             {
                 // 开始刷题
-                await StartExamWithRecommendedQuestionsAsync().ConfigureAwait(true);
+                await StartExamWithRecommendedQuestionsAsync().ConfigureAwait(false);
                 // 生成学习计划
-                await GenerateStudyPlanAsync().ConfigureAwait(true);
+                await GenerateStudyPlanAsync().ConfigureAwait(false);
             }
             else if (startExamDialog == MessageBoxResult.No)
             {
                 // 只开始刷题
-                await StartExamWithRecommendedQuestionsAsync().ConfigureAwait(true);
+                await StartExamWithRecommendedQuestionsAsync().ConfigureAwait(false);
             }
             else if (startExamDialog == MessageBoxResult.Cancel)
             {
                 // 只生成学习计划
-                await GenerateStudyPlanAsync().ConfigureAwait(true);
+                await GenerateStudyPlanAsync().ConfigureAwait(false);
             }
         }
         catch (Exception ex)
@@ -833,7 +842,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         var dialogResult = MessageBox.Show($"AI 已推荐 {_recommendedQuestionIds.Count} 道题目，是否开始刷题？", "AI 推荐", MessageBoxButton.YesNo, MessageBoxImage.Question);
         if (dialogResult == MessageBoxResult.Yes)
         {
-            await StartExamWithRecommendedQuestionsAsync().ConfigureAwait(true);
+            await StartExamWithRecommendedQuestionsAsync().ConfigureAwait(false);
         }
     }
 
@@ -844,13 +853,13 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         try
         {
-            await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(true);
+            await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(false);
             
             // 从数据库中获取推荐的题目
             var recommendedQuestions = await db.Questions.AsNoTracking()
                 .Where(q => q.IsEnabled && _recommendedQuestionIds.Contains(q.Id))
                 .ToListAsync()
-                .ConfigureAwait(true);
+                .ConfigureAwait(false);
             
             if (recommendedQuestions.Count == 0)
             {
@@ -897,18 +906,18 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(true);
+        await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(false);
         var userId = DatabaseInitializer.DemoUserId;
 
-        var total = await db.AnswerRecords.CountAsync(x => x.UserId == userId).ConfigureAwait(true);
-        var correct = await db.AnswerRecords.CountAsync(x => x.UserId == userId && x.IsCorrect).ConfigureAwait(true);
-        var wrongCount = await db.WrongBookEntries.CountAsync(x => x.UserId == userId).ConfigureAwait(true);
+        var total = await db.AnswerRecords.CountAsync(x => x.UserId == userId).ConfigureAwait(false);
+        var correct = await db.AnswerRecords.CountAsync(x => x.UserId == userId && x.IsCorrect).ConfigureAwait(false);
+        var wrongCount = await db.WrongBookEntries.CountAsync(x => x.UserId == userId).ConfigureAwait(false);
 
         var weakTags = await db.WrongBookEntries.AsNoTracking()
             .Where(w => w.UserId == userId)
             .Join(db.Questions.AsNoTracking(), w => w.QuestionId, q => q.Id, (_, q) => q.KnowledgeTags)
             .ToListAsync()
-            .ConfigureAwait(true);
+            .ConfigureAwait(false);
 
         var tagHistogram = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (var tags in weakTags)
@@ -934,7 +943,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             WeakTags = top
         };
 
-        var plan = await _studyPlan.GeneratePlanAsync(summary).ConfigureAwait(true);
+        var plan = await _studyPlan.GeneratePlanAsync(summary).ConfigureAwait(false);
         StudyPlanText =
             $"{plan.Title}\r\n阶段：{plan.PhaseDays} 天；每日：{plan.DailyQuestionQuota} 题。\r\n重点：{string.Join("、", plan.FocusKnowledgeTags)}\r\n说明：{plan.Notes}";
         StatusMessage = "学习计划已生成。";
@@ -958,7 +967,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         try
         {
             // 1. 首先获取用户的错题记录
-            await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(true);
+            await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(false);
             var userId = DatabaseInitializer.DemoUserId;
             
             var wrongEntries = await db.WrongBookEntries.AsNoTracking()
@@ -967,7 +976,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
                 .OrderByDescending(x => x.w.LastWrongAtUtc)
                 .Take(5) // 只分析最近的5道错题
                 .ToListAsync()
-                .ConfigureAwait(true);
+                .ConfigureAwait(false);
             
             // 2. 解析错题
             if (wrongEntries.Count > 0)
@@ -983,7 +992,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
                     SolutionHints = string.Empty
                 }).ToList();
                 
-                var analyzed = await _aiTutor.AnalyzeWrongQuestionsAsync(wrongInsights).ConfigureAwait(true);
+                var analyzed = await _aiTutor.AnalyzeWrongQuestionsAsync(wrongInsights).ConfigureAwait(false);
                 AiOutputText = FormatAiInsights(analyzed);
                 StatusMessage = "错题解析完成，正在推荐题目...";
             }
@@ -994,7 +1003,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             }
             
             // 3. 推荐题目
-            var recommendation = await _recommendation.RecommendAsync(userId).ConfigureAwait(true);
+            var recommendation = await _recommendation.RecommendAsync(userId).ConfigureAwait(false);
             _recommendedQuestionIds = recommendation.RecommendedQuestionIds.ToList();
             
             var sb = new StringBuilder(AiOutputText);
@@ -1007,15 +1016,15 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             StatusMessage = "题目推荐完成，正在生成学习计划...";
             
             // 4. 生成学习计划
-            var total = await db.AnswerRecords.CountAsync(x => x.UserId == userId).ConfigureAwait(true);
-            var correct = await db.AnswerRecords.CountAsync(x => x.UserId == userId && x.IsCorrect).ConfigureAwait(true);
-            var wrongCount = await db.WrongBookEntries.CountAsync(x => x.UserId == userId).ConfigureAwait(true);
+            var total = await db.AnswerRecords.CountAsync(x => x.UserId == userId).ConfigureAwait(false);
+            var correct = await db.AnswerRecords.CountAsync(x => x.UserId == userId && x.IsCorrect).ConfigureAwait(false);
+            var wrongCount = await db.WrongBookEntries.CountAsync(x => x.UserId == userId).ConfigureAwait(false);
 
             var weakTags = await db.WrongBookEntries.AsNoTracking()
                 .Where(w => w.UserId == userId)
                 .Join(db.Questions.AsNoTracking(), w => w.QuestionId, q => q.Id, (_, q) => q.KnowledgeTags)
                 .ToListAsync()
-                .ConfigureAwait(true);
+                .ConfigureAwait(false);
 
             var tagHistogram = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             foreach (var tags in weakTags)
@@ -1041,14 +1050,14 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
                 WeakTags = topTags
             };
 
-            var plan = await _studyPlan.GeneratePlanAsync(summary).ConfigureAwait(true);
+            var plan = await _studyPlan.GeneratePlanAsync(summary).ConfigureAwait(false);
             StudyPlanText =
                 $"{plan.Title}\r\n阶段：{plan.PhaseDays} 天；每日：{plan.DailyQuestionQuota} 题。\r\n重点：{string.Join("、", plan.FocusKnowledgeTags)}\r\n说明：{plan.Notes}";
             
             // 5. 询问用户是否开始刷题
             if (_recommendedQuestionIds.Count > 0)
             {
-                await ShowRecommendationDialogAsync().ConfigureAwait(true);
+                await ShowRecommendationDialogAsync().ConfigureAwait(false);
             }
             
             StatusMessage = "AI综合分析完成。";
@@ -1129,7 +1138,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         _logger.LogWarning("倒计时结束，自动交卷。");
 
         // 回到 UI 调度器执行异步交卷，避免与计时器回调产生竞态。
-        _ = Application.Current.Dispatcher.InvokeAsync(async () => await SubmitExamAsync().ConfigureAwait(true));
+        _ = Application.Current.Dispatcher.InvokeAsync(async () => await SubmitExamAsync().ConfigureAwait(false));
     }
 
     /// <summary>
@@ -1139,7 +1148,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         var entry = await db.WrongBookEntries
             .FirstOrDefaultAsync(x => x.UserId == userId && x.QuestionId == questionId)
-            .ConfigureAwait(true);
+            .ConfigureAwait(false);
 
         var now = DateTime.UtcNow;
         if (entry is null)
@@ -1338,7 +1347,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
 
         try
         {
-            var importResult = await _importService.ImportFromJsonFileAsync(filePath).ConfigureAwait(true);
+            var importResult = await _importService.ImportFromJsonFileAsync(filePath).ConfigureAwait(false);
 
             var sb = new StringBuilder();
             sb.AppendLine($"导入完成：成功 {importResult.SuccessCount} 题，失败 {importResult.FailCount} 题。");
@@ -1359,7 +1368,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
 
             if (importResult.SuccessCount > 0)
             {
-                await RefreshBankAsync().ConfigureAwait(true);
+                await RefreshBankAsync().ConfigureAwait(false);
             }
 
             StatusMessage = sb.ToString().Trim();
