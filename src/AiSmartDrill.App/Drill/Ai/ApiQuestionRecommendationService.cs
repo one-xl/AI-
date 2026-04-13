@@ -140,7 +140,7 @@ public sealed class ApiQuestionRecommendationService : IQuestionRecommendationSe
                 new
                 {
                     role = "user",
-                    content = $"推荐题目：用户ID={summary.UserId},总答题={summary.TotalAttempts},正确={summary.CorrectAttempts},错题={summary.WrongBookCount},弱项={weakTagsString}\n\n严格要求：仅返回JSON格式，包含Rationale和RecommendedQuestionIds两个字段，不要包含其他任何文本。\n示例：{\"Rationale\":\"推荐理由\",\"RecommendedQuestionIds\":[1,2,3,4,5,6,7,8]}"
+                    content = string.Format("推荐题目：用户ID={0},总答题={1},正确={2},错题={3},弱项={4}\n\n严格要求：仅返回JSON格式，包含Rationale和RecommendedQuestionIds两个字段，不要包含其他任何文本。\n示例：{{\"Rationale\":\"推荐理由\",\"RecommendedQuestionIds\":[1,2,3,4,5,6,7,8]}}" , summary.UserId, summary.TotalAttempts, summary.CorrectAttempts, summary.WrongBookCount, weakTagsString)
                 }
             },
             temperature = 0.3,

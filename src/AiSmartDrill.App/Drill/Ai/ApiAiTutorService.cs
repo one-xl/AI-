@@ -83,7 +83,7 @@ public sealed class ApiAiTutorService : IAiTutorService
                 new
                 {
                     role = "user",
-                    content = $"分析错题：类型={item.Type},题干={item.StemSummary},用户答案={item.UserAnswer},标准答案={item.StandardAnswer}\n\n严格要求：仅返回JSON格式，包含RootCause和SolutionHints两个字段，不要包含其他任何文本。\n示例：{\"RootCause\":\"错误原因\",\"SolutionHints\":\"解题思路\"}"
+                    content = string.Format("分析错题：类型={0},题干={1},用户答案={2},标准答案={3}\n\n严格要求：仅返回JSON格式，包含RootCause和SolutionHints两个字段，不要包含其他任何文本。\n示例：{{\"RootCause\":\"错误原因\",\"SolutionHints\":\"解题思路\"}}" , item.Type, item.StemSummary, item.UserAnswer, item.StandardAnswer)
                 }
             },
             temperature = 0.3,
