@@ -21,6 +21,11 @@ public sealed class Question
     public DifficultyLevel Difficulty { get; set; }
 
     /// <summary>
+    /// 获取或设置题目领域/学科。
+    /// </summary>
+    public QuestionDomain Domain { get; set; }
+
+    /// <summary>
     /// 获取或设置题干文本。
     /// </summary>
     public string Stem { get; set; } = string.Empty;

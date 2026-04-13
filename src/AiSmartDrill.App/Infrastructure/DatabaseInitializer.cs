@@ -138,6 +138,7 @@ public sealed class DatabaseInitializer
             {
                 Type = QuestionType.SingleChoice,
                 Difficulty = DifficultyLevel.Easy,
+                Domain = QuestionDomain.CSharp,
                 Stem = "C# 中值类型与引用类型的关键区别是什么？",
                 StandardAnswer = "A",
                 OptionsJson = Opt("A. 值类型通常分配在栈上，引用类型的变量保存对象引用", "B. 引用类型不能为 null", "C. 值类型一定比引用类型更快", "D. 二者没有区别"),
@@ -149,6 +150,7 @@ public sealed class DatabaseInitializer
             {
                 Type = QuestionType.TrueFalse,
                 Difficulty = DifficultyLevel.Easy,
+                Domain = QuestionDomain.CSharp,
                 Stem = "async/await 关键字会创建新的操作系统线程。",
                 StandardAnswer = "错",
                 OptionsJson = null,
@@ -160,6 +162,7 @@ public sealed class DatabaseInitializer
             {
                 Type = QuestionType.SingleChoice,
                 Difficulty = DifficultyLevel.Medium,
+                Domain = QuestionDomain.CSharp,
                 Stem = "EF Core 中 DbContext 的主要职责不包括哪一项？",
                 StandardAnswer = "B",
                 OptionsJson = Opt("A. 跟踪实体变更", "B. 替代 SQL Server 执行查询优化器", "C. 生成并执行 SQL", "D. 配置实体映射"),
@@ -171,6 +174,7 @@ public sealed class DatabaseInitializer
             {
                 Type = QuestionType.ShortAnswer,
                 Difficulty = DifficultyLevel.Medium,
+                Domain = QuestionDomain.DataStructure,
                 Stem = "简述依赖注入（DI）在桌面应用中的两个好处。",
                 StandardAnswer = "解耦;可测试",
                 OptionsJson = null,
@@ -182,6 +186,7 @@ public sealed class DatabaseInitializer
             {
                 Type = QuestionType.SingleChoice,
                 Difficulty = DifficultyLevel.Hard,
+                Domain = QuestionDomain.CSharp,
                 Stem = "WPF 数据绑定中 INotifyPropertyChanged 的作用是？",
                 StandardAnswer = "C",
                 OptionsJson = Opt("A. 提升渲染性能", "B. 自动生成 XAML", "C. 在属性变更时通知 UI 更新", "D. 仅用于集合绑定"),
@@ -193,6 +198,7 @@ public sealed class DatabaseInitializer
             {
                 Type = QuestionType.MultipleChoice,
                 Difficulty = DifficultyLevel.Medium,
+                Domain = QuestionDomain.Database,
                 Stem = "以下哪些属于关系数据库范式化的常见目标？（多选）",
                 StandardAnswer = "A,C",
                 OptionsJson = Opt("A. 减少冗余", "B. 提升 CPU 主频", "C. 避免更新异常", "D. 让表名更短"),
@@ -204,6 +210,7 @@ public sealed class DatabaseInitializer
             {
                 Type = QuestionType.SingleChoice,
                 Difficulty = DifficultyLevel.Easy,
+                Domain = QuestionDomain.Database,
                 Stem = "SQLite 作为嵌入式数据库的典型优势是？",
                 StandardAnswer = "D",
                 OptionsJson = Opt("A. 必须安装服务器", "B. 不支持事务", "C. 仅支持单表", "D. 文件型部署，便于分发"),
@@ -215,6 +222,7 @@ public sealed class DatabaseInitializer
             {
                 Type = QuestionType.TrueFalse,
                 Difficulty = DifficultyLevel.Medium,
+                Domain = QuestionDomain.Database,
                 Stem = "唯一索引可以保证 (UserId, QuestionId) 组合不重复。",
                 StandardAnswer = "对",
                 OptionsJson = null,
@@ -226,6 +234,7 @@ public sealed class DatabaseInitializer
             {
                 Type = QuestionType.ShortAnswer,
                 Difficulty = DifficultyLevel.Hard,
+                Domain = QuestionDomain.DataStructure,
                 Stem = "说明随机组卷时如何保证题型分布更均匀的一种策略。",
                 StandardAnswer = "分层抽样",
                 OptionsJson = null,
@@ -237,6 +246,7 @@ public sealed class DatabaseInitializer
             {
                 Type = QuestionType.SingleChoice,
                 Difficulty = DifficultyLevel.Medium,
+                Domain = QuestionDomain.Uncategorized,
                 Stem = "错题本闭环中，最关键的业务动作是？",
                 StandardAnswer = "A",
                 OptionsJson = Opt("A. 答错自动归集并可重复练习", "B. 删除所有历史记录", "C. 禁止查看解析", "D. 仅展示排行榜"),
@@ -248,6 +258,7 @@ public sealed class DatabaseInitializer
             {
                 Type = QuestionType.SingleChoice,
                 Difficulty = DifficultyLevel.Easy,
+                Domain = QuestionDomain.Uncategorized,
                 Stem = "HTTP 调用失败时，占位 AI 服务应优先？",
                 StandardAnswer = "B",
                 OptionsJson = Opt("A. 直接崩溃", "B. 返回可解释的降级结果", "C. 无限重试不提示", "D. 写入注册表"),
@@ -259,6 +270,7 @@ public sealed class DatabaseInitializer
             {
                 Type = QuestionType.SingleChoice,
                 Difficulty = DifficultyLevel.Hard,
+                Domain = QuestionDomain.CSharp,
                 Stem = "在 MVVM 中，视图层不应直接访问？",
                 StandardAnswer = "C",
                 OptionsJson = Opt("A. 资源字典", "B. 样式", "C. DbContext（建议通过服务注入）", "D. 画刷"),
@@ -270,6 +282,7 @@ public sealed class DatabaseInitializer
             {
                 Type = QuestionType.ShortAnswer,
                 Difficulty = DifficultyLevel.Easy,
+                Domain = QuestionDomain.CSharp,
                 Stem = "写出一种计时倒计时的 UI 更新方式（关键词即可）。",
                 StandardAnswer = "DispatcherTimer",
                 OptionsJson = null,
@@ -281,6 +294,7 @@ public sealed class DatabaseInitializer
             {
                 Type = QuestionType.MultipleChoice,
                 Difficulty = DifficultyLevel.Hard,
+                Domain = QuestionDomain.Uncategorized,
                 Stem = "以下哪些属于 AI 刷题系统的合理能力边界？（多选）",
                 StandardAnswer = "A,D",
                 OptionsJson = Opt("A. 解析错题原因（可结构化）", "B. 替用户自动点击交卷", "C. 绕过本地数据库校验", "D. 推荐相似知识点题目"),
@@ -292,6 +306,7 @@ public sealed class DatabaseInitializer
             {
                 Type = QuestionType.SingleChoice,
                 Difficulty = DifficultyLevel.Medium,
+                Domain = QuestionDomain.DataStructure,
                 Stem = "交卷自动判分的关键输入是？",
                 StandardAnswer = "A",
                 OptionsJson = Opt("A. 用户答案与标准答案", "B. 窗口标题", "C. 主题色", "D. 鼠标 DPI"),
@@ -303,6 +318,7 @@ public sealed class DatabaseInitializer
             {
                 Type = QuestionType.TrueFalse,
                 Difficulty = DifficultyLevel.Easy,
+                Domain = QuestionDomain.CSharp,
                 Stem = "XML 文档注释会影响运行时性能。",
                 StandardAnswer = "错",
                 OptionsJson = null,
@@ -314,6 +330,7 @@ public sealed class DatabaseInitializer
             {
                 Type = QuestionType.SingleChoice,
                 Difficulty = DifficultyLevel.Medium,
+                Domain = QuestionDomain.Database,
                 Stem = "连接字符串应主要存放于？",
                 StandardAnswer = "B",
                 OptionsJson = Opt("A. 源代码常量硬编码", "B. 配置文件（不入库密钥）", "C. 图片资源", "D. 注释里"),
@@ -325,6 +342,7 @@ public sealed class DatabaseInitializer
             {
                 Type = QuestionType.ShortAnswer,
                 Difficulty = DifficultyLevel.Medium,
+                Domain = QuestionDomain.Database,
                 Stem = "说明为何错题本表需要对 (UserId, QuestionId) 建唯一约束。",
                 StandardAnswer = "去重",
                 OptionsJson = null,

@@ -31,6 +31,8 @@
                         <ComboBox Width="120" ItemsSource="{Binding TypeFilterOptions}" SelectedItem="{Binding SelectedTypeFilter}" />
                         <Label Margin="12,0,0,0" Content="难度" VerticalAlignment="Center" />
                         <ComboBox Width="120" ItemsSource="{Binding DifficultyFilterOptions}" SelectedItem="{Binding SelectedDifficultyFilter}" />
+                        <Label Margin="12,0,0,0" Content="领域" VerticalAlignment="Center" />
+                        <ComboBox Width="150" ItemsSource="{Binding DomainFilterOptions}" SelectedItem="{Binding SelectedDomainFilter}" />
                         <Button Content="刷新题库" Command="{Binding RefreshBankCommand}" />
                         <Button Content="新建题目" Command="{Binding NewQuestionCommand}" />
                         <Button Content="保存题目" Command="{Binding SaveQuestionCommand}" />
@@ -65,6 +67,8 @@
                             <ComboBox ItemsSource="{Binding EditorTypeOptions}" SelectedItem="{Binding EditorType}" />
                             <Label Content="难度" />
                             <ComboBox ItemsSource="{Binding EditorDifficultyOptions}" SelectedItem="{Binding EditorDifficulty}" />
+                            <Label Content="领域" />
+                            <ComboBox ItemsSource="{Binding EditorDomainOptions}" SelectedItem="{Binding EditorDomain}" />
                             <Label Content="题干" />
                             <TextBox Height="90" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" Text="{Binding EditorStem, UpdateSourceTrigger=PropertyChanged}" />
                             <Label Content="标准答案" />

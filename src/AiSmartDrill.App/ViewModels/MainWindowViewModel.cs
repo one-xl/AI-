@@ -88,8 +88,10 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
 
         TypeFilterOptions = new ObservableCollection<string> { "全部", "单选", "多选", "判断", "简答" };
         DifficultyFilterOptions = new ObservableCollection<string> { "全部", "简单", "中等", "困难" };
+        DomainFilterOptions = new ObservableCollection<string> { "全部", "未分类", "Python", "C", "C++", "C#", "Rust", "Java", "JavaScript", "Go", "数据结构与算法", "数据库", "操作系统", "计算机网络" };
         EditorTypeOptions = new ObservableCollection<string> { "单选", "多选", "判断", "简答" };
         EditorDifficultyOptions = new ObservableCollection<string> { "简单", "中等", "困难" };
+        EditorDomainOptions = new ObservableCollection<string> { "未分类", "Python", "C", "C++", "C#", "Rust", "Java", "JavaScript", "Go", "数据结构与算法", "数据库", "操作系统", "计算机网络" };
 
         SelectedTypeFilter = "全部";
         SelectedDifficultyFilter = "全部";
@@ -119,6 +121,16 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     /// 获取编辑器难度下拉选项。
     /// </summary>
     public ObservableCollection<string> EditorDifficultyOptions { get; }
+
+    /// <summary>
+    /// 获取领域筛选下拉选项。
+    /// </summary>
+    public ObservableCollection<string> DomainFilterOptions { get; }
+
+    /// <summary>
+    /// 获取编辑器领域下拉选项。
+    /// </summary>
+    public ObservableCollection<string> EditorDomainOptions { get; }
 
     /// <summary>
     /// 题库列表（当前筛选结果）。
@@ -169,6 +181,12 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     private string _editorDifficulty = "简单";
 
     /// <summary>
+    /// 编辑器：领域（字符串与 ComboBox 对齐）。
+    /// </summary>
+    [ObservableProperty]
+    private string _editorDomain = "未分类";
+
+    /// <summary>
     /// 题库筛选：题型。
     /// </summary>
     [ObservableProperty]
@@ -179,6 +197,12 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     /// </summary>
     [ObservableProperty]
     private string _selectedDifficultyFilter = "全部";
+
+    /// <summary>
+    /// 题库筛选：领域。
+    /// </summary>
+    [ObservableProperty]
+    private string _selectedDomainFilter = "全部";
 
     /// <summary>
     /// 组卷：题目数量。
@@ -299,10 +323,11 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         EditorKnowledgeTags = value.KnowledgeTags;
         EditorType = MapTypeToUi(value.Type);
         EditorDifficulty = MapDifficultyToUi(value.Difficulty);
+        EditorDomain = MapDomainToUi(value.Domain);
     }
 
     /// <summary>
-    /// 刷新题库列表（应用题型+难度 AND 筛选）。
+    /// 刷新题库列表（应用题型+难度+领域 AND 筛选）。
     /// </summary>
     [RelayCommand]
     private async Task RefreshBankAsync()
@@ -322,9 +347,15 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             q = q.Where(x => x.Difficulty == diff);
         }
 
+        var domain = MapUiToDomainOrNull(SelectedDomainFilter);
+        if (domain is not null)
+        {
+            q = q.Where(x => x.Domain == domain);
+        }
+
         var list = await q.OrderByDescending(x => x.Id).ToListAsync().ConfigureAwait(true);
         BankQuestions = new ObservableCollection<Question>(list);
-        StatusMessage = $"题库已刷新：{list.Count} 条（筛选：{SelectedTypeFilter} + {SelectedDifficultyFilter}）。";
+        StatusMessage = $"题库已刷新：{list.Count} 条（筛选：{SelectedTypeFilter} + {SelectedDifficultyFilter} + {SelectedDomainFilter}）。";
     }
 
     /// <summary>
@@ -342,6 +373,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(true);
         var type = MapUiToType(EditorType);
         var diff = MapUiToDifficulty(EditorDifficulty);
+        var domain = MapUiToDomain(EditorDomain);
 
         if (SelectedBankQuestion is null)
         {
@@ -353,6 +385,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
                 KnowledgeTags = string.IsNullOrWhiteSpace(EditorKnowledgeTags) ? "未分类" : EditorKnowledgeTags.Trim(),
                 Type = type,
                 Difficulty = diff,
+                Domain = domain,
                 IsEnabled = true,
                 CreatedAtUtc = DateTime.UtcNow
             });
@@ -372,6 +405,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             entity.KnowledgeTags = string.IsNullOrWhiteSpace(EditorKnowledgeTags) ? "未分类" : EditorKnowledgeTags.Trim();
             entity.Type = type;
             entity.Difficulty = diff;
+            entity.Domain = domain;
         }
 
         await db.SaveChangesAsync().ConfigureAwait(true);
@@ -392,6 +426,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         EditorKnowledgeTags = "示例标签,基础";
         EditorType = "单选";
         EditorDifficulty = "简单";
+        EditorDomain = "未分类";
         StatusMessage = "已进入新建题目模式。";
     }
 
@@ -1223,6 +1258,59 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         "中等" => DifficultyLevel.Medium,
         "困难" => DifficultyLevel.Hard,
         "简单" => DifficultyLevel.Easy,
+        _ => null
+    };
+
+    private static string MapDomainToUi(QuestionDomain d) => d switch
+    {
+        QuestionDomain.Python => "Python",
+        QuestionDomain.C => "C",
+        QuestionDomain.CPlusPlus => "C++",
+        QuestionDomain.CSharp => "C#",
+        QuestionDomain.Rust => "Rust",
+        QuestionDomain.Java => "Java",
+        QuestionDomain.JavaScript => "JavaScript",
+        QuestionDomain.Go => "Go",
+        QuestionDomain.DataStructure => "数据结构与算法",
+        QuestionDomain.Database => "数据库",
+        QuestionDomain.OperatingSystem => "操作系统",
+        QuestionDomain.ComputerNetwork => "计算机网络",
+        _ => "未分类"
+    };
+
+    private static QuestionDomain MapUiToDomain(string ui) => ui switch
+    {
+        "Python" => QuestionDomain.Python,
+        "C" => QuestionDomain.C,
+        "C++" => QuestionDomain.CPlusPlus,
+        "C#" => QuestionDomain.CSharp,
+        "Rust" => QuestionDomain.Rust,
+        "Java" => QuestionDomain.Java,
+        "JavaScript" => QuestionDomain.JavaScript,
+        "Go" => QuestionDomain.Go,
+        "数据结构与算法" => QuestionDomain.DataStructure,
+        "数据库" => QuestionDomain.Database,
+        "操作系统" => QuestionDomain.OperatingSystem,
+        "计算机网络" => QuestionDomain.ComputerNetwork,
+        _ => QuestionDomain.Uncategorized
+    };
+
+    private static QuestionDomain? MapUiToDomainOrNull(string ui) => ui switch
+    {
+        "全部" => null,
+        "未分类" => QuestionDomain.Uncategorized,
+        "Python" => QuestionDomain.Python,
+        "C" => QuestionDomain.C,
+        "C++" => QuestionDomain.CPlusPlus,
+        "C#" => QuestionDomain.CSharp,
+        "Rust" => QuestionDomain.Rust,
+        "Java" => QuestionDomain.Java,
+        "JavaScript" => QuestionDomain.JavaScript,
+        "Go" => QuestionDomain.Go,
+        "数据结构与算法" => QuestionDomain.DataStructure,
+        "数据库" => QuestionDomain.Database,
+        "操作系统" => QuestionDomain.OperatingSystem,
+        "计算机网络" => QuestionDomain.ComputerNetwork,
         _ => null
     };
 
