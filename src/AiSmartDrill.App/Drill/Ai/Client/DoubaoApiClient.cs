@@ -36,15 +36,25 @@ namespace AiSmartDrill.App.Drill.Ai.Client
             IList<ToolDefinition>? tools = null,
             CancellationToken cancellationToken = default)
         {
+            // 转换消息格式以匹配官方 API
+            var inputMessages = new List<object>();
+            foreach (var message in messages)
+            {
+                var content = new List<object>();
+                content.Add(new { type = "input_text", text = message.Content });
+                
+                inputMessages.Add(new {
+                    role = message.Role,
+                    content = content
+                });
+            }
+
             var request = new
             {
                 model = _config.ModelName,
-                messages = messages,
-                tools = tools,
+                input = inputMessages,
                 temperature = 0.7,
-                max_tokens = 1000,
-                stream = false,
-                enable_thinking = _config.EnableThinking
+                max_tokens = 1000
             };
 
             var requestContent = new StringContent(
@@ -53,8 +63,16 @@ namespace AiSmartDrill.App.Drill.Ai.Client
                 "application/json"
             );
 
-            var response = await _httpClient.PostAsync("/chat/completions", requestContent, cancellationToken);
-            response.EnsureSuccessStatusCode();
+            var response = await _httpClient.PostAsync("/responses", requestContent, cancellationToken);
+            try
+            {
+                response.EnsureSuccessStatusCode();
+            }
+            catch (HttpRequestException ex)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
+                throw new Exception($"API 调用失败: {ex.Message}\n响应内容: {errorContent}", ex);
+            }
 
             var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
             return JsonSerializer.Deserialize<ChatCompletionResponse>(responseContent, _jsonOptions)!;
@@ -65,15 +83,26 @@ namespace AiSmartDrill.App.Drill.Ai.Client
             IList<ToolDefinition>? tools = null,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
+            // 转换消息格式以匹配官方 API
+            var inputMessages = new List<object>();
+            foreach (var message in messages)
+            {
+                var content = new List<object>();
+                content.Add(new { type = "input_text", text = message.Content });
+                
+                inputMessages.Add(new {
+                    role = message.Role,
+                    content = content
+                });
+            }
+
             var request = new
             {
                 model = _config.ModelName,
-                messages = messages,
-                tools = tools,
+                input = inputMessages,
                 temperature = 0.7,
                 max_tokens = 1000,
-                stream = true,
-                enable_thinking = _config.EnableThinking
+                stream = true
             };
 
             var requestContent = new StringContent(
@@ -82,7 +111,7 @@ namespace AiSmartDrill.App.Drill.Ai.Client
                 "application/json"
             );
 
-            var httpRequest = new HttpRequestMessage(HttpMethod.Post, "/chat/completions")
+            var httpRequest = new HttpRequestMessage(HttpMethod.Post, "/responses")
             {
                 Content = requestContent
             };
@@ -93,7 +122,15 @@ namespace AiSmartDrill.App.Drill.Ai.Client
                 cancellationToken
             );
 
-            response.EnsureSuccessStatusCode();
+            try
+            {
+                response.EnsureSuccessStatusCode();
+            }
+            catch (HttpRequestException ex)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
+                throw new Exception($"API 调用失败: {ex.Message}\n响应内容: {errorContent}", ex);
+            }
 
             using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
             using var reader = new System.IO.StreamReader(stream);
