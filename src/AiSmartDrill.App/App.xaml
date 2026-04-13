@@ -90,11 +90,11 @@
                     <Setter Property="Foreground" Value="#0B1220" />
                 </Trigger>
                 <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#374151" />
+                    <Setter Property="Background" Value="#2D3748" />
                     <Setter Property="Foreground" Value="{StaticResource Brush.Text}" />
                 </Trigger>
                 <Trigger Property="IsHighlighted" Value="True">
-                    <Setter Property="Background" Value="#374151" />
+                    <Setter Property="Background" Value="#2D3748" />
                     <Setter Property="Foreground" Value="{StaticResource Brush.Text}" />
                 </Trigger>
             </Style.Triggers>
@@ -108,11 +108,11 @@
             <Setter Property="Margin" Value="0,0,8,8" />
             <Style.Triggers>
                 <Trigger Property="IsPressed" Value="True">
-                    <Setter Property="Background" Value="#374151" />
+                    <Setter Property="Background" Value="#2D3748" />
                     <Setter Property="BorderBrush" Value="{StaticResource Brush.Accent}" />
                 </Trigger>
                 <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#374151" />
+                    <Setter Property="Background" Value="#2D3748" />
                     <Setter Property="BorderBrush" Value="{StaticResource Brush.Accent}" />
                 </Trigger>
             </Style.Triggers>
