@@ -65,7 +65,7 @@ namespace AiSmartDrill.App.Drill.Ai.Client
                 "application/json"
             );
 
-            var fullUrl = new Uri(_config.BaseUrl, "/chat/completions");
+            var fullUrl = new Uri(new Uri(_config.BaseUrl), "/chat/completions");
             _logger.LogInformation("请求URL: {FullUrl}", fullUrl);
 
             try
