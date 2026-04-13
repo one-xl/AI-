@@ -64,7 +64,7 @@
                                     </ControlTemplate>
                                 </ToggleButton.Template>
                             </ToggleButton>
-                            <ContentPresenter Name="ContentSite" IsHitTestVisible="False" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}" Margin="{TemplateBinding Padding}" VerticalAlignment="Center" HorizontalAlignment="Left" Foreground="{TemplateBinding Foreground}" />
+                            <TextBlock Name="ContentSite" IsHitTestVisible="False" Text="{TemplateBinding SelectionBoxItem}" Margin="{TemplateBinding Padding}" VerticalAlignment="Center" HorizontalAlignment="Left" Foreground="{TemplateBinding Foreground}" />
                             <Popup Name="Popup" Placement="Bottom" IsOpen="{TemplateBinding IsDropDownOpen}" AllowsTransparency="True" Focusable="False" PopupAnimation="Slide">
                                 <Border Name="DropDownBorder" Background="#1F2937" BorderBrush="#334155" BorderThickness="1" MinWidth="{TemplateBinding ActualWidth}">
                                     <ScrollViewer Margin="4,6,4,6" SnapsToDevicePixels="True">
