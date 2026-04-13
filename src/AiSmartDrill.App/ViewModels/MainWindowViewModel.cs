@@ -544,6 +544,35 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// 取消做题：不保存答题记录，直接结束考试。
+    /// </summary>
+    [RelayCommand]
+    private void CancelExam()
+    {
+        if (!IsExamRunning)
+        {
+            return;
+        }
+
+        var dialogResult = MessageBox.Show("确定要取消当前考试吗？答题记录将不会保存。", "取消考试", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (dialogResult != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        _examTimer.Stop();
+        IsExamRunning = false;
+        _examQuestions.Clear();
+        _answersByDisplayIndex.Clear();
+        ExamStem = string.Empty;
+        ExamTypeText = string.Empty;
+        ExamDifficultyText = string.Empty;
+        ExamOptionsDisplay = string.Empty;
+        ExamUserAnswer = string.Empty;
+        StatusMessage = "已取消考试。";
+    }
+
+    /// <summary>
     /// 交卷：自动判分、写入答题记录、更新错题本，并触发 AI 错题解析调用链。
     /// </summary>
     [RelayCommand]

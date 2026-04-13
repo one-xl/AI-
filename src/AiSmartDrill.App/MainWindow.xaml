@@ -81,13 +81,14 @@
             <TabItem Header="考试 / 刷题">
                 <DockPanel Margin="0,10,0,0">
                     <Border DockPanel.Dock="Top" Padding="12" CornerRadius="10" Background="{StaticResource Brush.Surface}" BorderBrush="#334155" BorderThickness="1" Margin="0,0,0,12">
-                        <WrapPanel ItemHeight="32">
+                        <WrapPanel ItemHeight="40">
                             <Label Content="题量" VerticalAlignment="Center" />
-                            <TextBox Width="70" Text="{Binding ExamQuestionCount, UpdateSourceTrigger=PropertyChanged}" />
+                            <TextBox Width="70" Text="{Binding ExamQuestionCount, UpdateSourceTrigger=PropertyChanged}" Height="32" />
                             <Label Margin="12,0,0,0" Content="时长(分)" VerticalAlignment="Center" />
-                            <TextBox Width="70" Text="{Binding ExamMinutes, UpdateSourceTrigger=PropertyChanged}" />
-                            <Button Content="随机组卷并开始" Command="{Binding StartExamCommand}" />
-                            <Button Content="交卷" Command="{Binding SubmitExamCommand}" />
+                            <TextBox Width="70" Text="{Binding ExamMinutes, UpdateSourceTrigger=PropertyChanged}" Height="32" />
+                            <Button Content="随机组卷并开始" Command="{Binding StartExamCommand}" Width="140" Height="35" />
+                            <Button Content="交卷" Command="{Binding SubmitExamCommand}" Width="80" Height="35" />
+                            <Button Content="取消做题" Command="{Binding CancelExamCommand}" Width="80" Height="35" />
                             <TextBlock Margin="12,0,0,0" VerticalAlignment="Center" Text="{Binding LastScoreText, StringFormat=最近成绩：{0}}" />
                         </WrapPanel>
                     </Border>
