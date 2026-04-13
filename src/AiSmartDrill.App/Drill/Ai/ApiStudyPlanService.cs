@@ -1,48 +1,52 @@
+using System.Text.Json;
+using AiSmartDrill.App.Drill.Ai.Ark;
 using AiSmartDrill.App.Drill.Ai.Client;
 using Microsoft.Extensions.Logging;
-using System.Text.Json;
 
 namespace AiSmartDrill.App.Drill.Ai;
 
 /// <summary>
-/// 基于Ark API的学习计划生成服务：调用火山引擎Ark API生成个性化刷题计划。
+/// 基于火山方舟 Chat Completions 的学习计划生成：解析 JSON 计划 DTO，失败时回退本地启发式计划。
 /// </summary>
 public sealed class ApiStudyPlanService : IStudyPlanService
 {
-    private readonly IChatCompletionService _chatCompletionService;
+    private readonly IChatCompletionService _chat;
     private readonly ILogger<ApiStudyPlanService> _logger;
+    private readonly AiCallTrace _trace;
 
     /// <summary>
-    /// 初始化 <see cref="ApiStudyPlanService"/> 的新实例。
+    /// 初始化 <see cref="ApiStudyPlanService"/>。
     /// </summary>
-    /// <param name="chatCompletionService">聊天完成服务。</param>
-    /// <param name="logger">日志记录器。</param>
     public ApiStudyPlanService(
         IChatCompletionService chatCompletionService,
-        ILogger<ApiStudyPlanService> logger)
+        ILogger<ApiStudyPlanService> logger,
+        AiCallTrace trace)
     {
-        _chatCompletionService = chatCompletionService;
+        _chat = chatCompletionService;
         _logger = logger;
+        _trace = trace;
     }
 
     /// <inheritdoc />
     public async Task<StudyPlanDto> GeneratePlanAsync(UserPerformanceSummary summary, CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("AI 学习计划生成（API）：UserId={UserId}", summary.UserId);
+        _logger.LogInformation("AI 学习计划（Ark）：UserId={UserId}", summary.UserId);
 
         try
         {
-            return await CallAiApiAsync(summary, cancellationToken).ConfigureAwait(false);
+            var plan = await CallArkAsync(summary, cancellationToken).ConfigureAwait(false);
+            _trace.Set("plan:ark", true);
+            return plan;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "AI API 调用失败，回退到本地计划生成");
-            // 回退到本地计划生成
-            return FallbackToLocalPlan(summary);
+            _logger.LogError(ex, "Ark 学习计划失败，回退本地");
+            _trace.Set("plan:local-fallback", false);
+            return FallbackLocalPlan(summary);
         }
     }
 
-    private async Task<StudyPlanDto> CallAiApiAsync(UserPerformanceSummary summary, CancellationToken cancellationToken)
+    private async Task<StudyPlanDto> CallArkAsync(UserPerformanceSummary summary, CancellationToken cancellationToken)
     {
         var weakTagsString = string.Join(", ", summary.WeakTags);
 
@@ -51,50 +55,39 @@ public sealed class ApiStudyPlanService : IStudyPlanService
             new ChatMessage
             {
                 Role = "system",
-                Content = "教育AI助手：根据学生学习数据生成个性化刷题计划。"
+                Content =
+                    "你是学习规划助手。只输出一个 JSON 对象，不要 Markdown，不要解释。字段：Title(string)、DailyQuestionQuota(number)、FocusKnowledgeTags(string[])、PhaseDays(number)、Notes(string)。"
             },
             new ChatMessage
             {
                 Role = "user",
-                Content = string.Format("生成计划：用户ID={0},总答题={1},正确={2},错题={3},弱项={4}\n\n严格要求：仅返回JSON格式，包含Title、DailyQuestionQuota、FocusKnowledgeTags、PhaseDays、Notes五个字段，不要包含其他任何文本。\n示例：{{\"Title\":\"计划标题\",\"DailyQuestionQuota\":5,\"FocusKnowledgeTags\":[\"知识点1\",\"知识点2\"],\"PhaseDays\":7,\"Notes\":\"计划说明\"}}" , summary.UserId, summary.TotalAttempts, summary.CorrectAttempts, summary.WrongBookCount, weakTagsString)
+                Content =
+                    $"生成计划：用户ID={summary.UserId}, 总答题={summary.TotalAttempts}, 正确={summary.CorrectAttempts}, 错题条目={summary.WrongBookCount}, 弱项={weakTagsString}"
             }
         };
 
-        var response = await _chatCompletionService.GenerateCompletionAsync(messages, null, cancellationToken).ConfigureAwait(false);
+        var response = await _chat.GenerateCompletionAsync(messages, null, cancellationToken).ConfigureAwait(false);
+        var raw = ArkAssistantReply.GetPrimaryText(response);
+        var json = ArkModelOutputParsing.ExtractFirstJsonValue(raw);
+        if (string.IsNullOrWhiteSpace(json))
+            throw new InvalidOperationException("模型返回为空。");
 
-        // 尝试解析AI返回的JSON
-        var aiContent = response.Choices?.FirstOrDefault()?.Message?.Content ?? string.Empty;
-        try
-        {
-            if (string.IsNullOrEmpty(aiContent))
-            {
-                throw new InvalidOperationException("AI API 返回内容为空");
-            }
-            var planResult = JsonSerializer.Deserialize<StudyPlanDto>(aiContent);
-            return planResult ?? FallbackToLocalPlan(summary);
-        }
-        catch
-        {
-            // 如果AI返回的不是JSON格式，使用默认计划
-            return FallbackToLocalPlan(summary);
-        }
+        var plan = JsonSerializer.Deserialize<StudyPlanDto>(json, ArkChatJsonDefaults.ModelPayloadOptions);
+        return plan ?? throw new InvalidOperationException("学习计划 JSON 反序列化失败。");
     }
 
-    private StudyPlanDto FallbackToLocalPlan(UserPerformanceSummary summary)
+    private static StudyPlanDto FallbackLocalPlan(UserPerformanceSummary summary)
     {
-        // 基于用户数据生成默认计划
         var dailyQuota = summary.TotalAttempts > 0 ? Math.Max(5, summary.TotalAttempts / 10) : 5;
         var phaseDays = summary.WrongBookCount > 10 ? 14 : 7;
 
         return new StudyPlanDto
         {
-            Title = "个性化学习计划",
+            Title = "[本地回退] 个性化学习计划",
             DailyQuestionQuota = dailyQuota,
             FocusKnowledgeTags = summary.WeakTags.Count > 0 ? summary.WeakTags : new List<string> { "基础知识" },
             PhaseDays = phaseDays,
-            Notes = "基于您的学习数据生成的默认计划。建议每天坚持练习，重点关注薄弱知识点。"
+            Notes = "[本地回退·未调用方舟] 基于本地规则生成的计划；若方舟可用，此处应由模型生成。"
         };
     }
-
-
 }

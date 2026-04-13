@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using AiSmartDrill.App.Domain;
 
 namespace AiSmartDrill.App.Drill.Grading;
@@ -33,6 +34,7 @@ public static class AnswerGrader
             QuestionType.TrueFalse => GradeTrueFalse(ua, sa),
             QuestionType.MultipleChoice => GradeMultipleChoice(ua, sa),
             QuestionType.ShortAnswer => GradeShortAnswer(ua, sa),
+            QuestionType.FillInBlank => GradeFillInBlank(ua, sa),
             _ => GradeSingleChoice(ua, sa)
         };
     }
@@ -114,6 +116,31 @@ public static class AnswerGrader
 
         // 所有关键词都需要出现在用户答案中（不区分大小写）。
         return keys.All(k => userAnswer.IndexOf(k, StringComparison.OrdinalIgnoreCase) >= 0);
+    }
+
+    /// <summary>
+    /// 填空题判分：<paramref name="standardAnswer"/> 为正则表达式，整段用户输入参与匹配（忽略大小写）。
+    /// 若表达式非法则退化为“包含子串”判断，避免录入错误导致全盘判错。
+    /// </summary>
+    /// <param name="userAnswer">用户答案。</param>
+    /// <param name="standardAnswer">标准答案（正则模式）。</param>
+    /// <returns>是否正确。</returns>
+    private static bool GradeFillInBlank(string userAnswer, string standardAnswer)
+    {
+        if (string.IsNullOrWhiteSpace(userAnswer) || string.IsNullOrWhiteSpace(standardAnswer))
+        {
+            return false;
+        }
+
+        var pattern = standardAnswer.Trim();
+        try
+        {
+            return Regex.IsMatch(userAnswer.Trim(), pattern, RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+        }
+        catch (ArgumentException)
+        {
+            return userAnswer.IndexOf(pattern, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
     }
 
     /// <summary>

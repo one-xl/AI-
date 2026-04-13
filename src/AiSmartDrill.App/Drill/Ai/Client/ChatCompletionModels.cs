@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
+using AiSmartDrill.App.Drill.Ai.Ark;
 
 namespace AiSmartDrill.App.Drill.Ai.Client;
 
@@ -13,13 +15,15 @@ public class ChatMessage
     public string Role { get; set; } = string.Empty;
 
     /// <summary>
-    /// 内容
+    /// 内容（响应体中可能为字符串或多段 JSON，由 <see cref="ArkChatContentStringConverter"/> 统一为文本）。
     /// </summary>
+    [JsonConverter(typeof(ArkChatContentStringConverter))]
     public string Content { get; set; } = string.Empty;
 
     /// <summary>
     /// 推理内容
     /// </summary>
+    [JsonPropertyName("reasoning_content")]
     public string? ReasoningContent { get; set; }
 }
 
@@ -145,6 +149,7 @@ public class Choice
     /// <summary>
     /// 完成原因
     /// </summary>
+    [JsonPropertyName("finish_reason")]
     public string FinishReason { get; set; } = string.Empty;
 
     /// <summary>
@@ -203,16 +208,19 @@ public class Usage
     /// <summary>
     /// 提示令牌
     /// </summary>
+    [JsonPropertyName("prompt_tokens")]
     public int PromptTokens { get; set; }
 
     /// <summary>
     /// 完成令牌
     /// </summary>
+    [JsonPropertyName("completion_tokens")]
     public int CompletionTokens { get; set; }
 
     /// <summary>
     /// 总令牌
     /// </summary>
+    [JsonPropertyName("total_tokens")]
     public int TotalTokens { get; set; }
 
     /// <summary>
@@ -234,6 +242,7 @@ public class PromptTokensDetails
     /// <summary>
     /// 缓存令牌
     /// </summary>
+    [JsonPropertyName("cached_tokens")]
     public int CachedTokens { get; set; }
 }
 
@@ -245,6 +254,7 @@ public class CompletionTokensDetails
     /// <summary>
     /// 推理令牌
     /// </summary>
+    [JsonPropertyName("reasoning_tokens")]
     public int ReasoningTokens { get; set; }
 }
 
@@ -297,6 +307,7 @@ public class StreamChoice
     /// <summary>
     /// 完成原因
     /// </summary>
+    [JsonPropertyName("finish_reason")]
     public string? FinishReason { get; set; }
 
     /// <summary>

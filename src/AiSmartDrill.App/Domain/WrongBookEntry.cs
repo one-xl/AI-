@@ -32,6 +32,16 @@ public sealed class WrongBookEntry
     public DateTime LastWrongAtUtc { get; set; }
 
     /// <summary>
+    /// 获取或设置最近一次答错时的用户作答快照（开启「长期保存错题详情」时写入）。
+    /// </summary>
+    public string? LastWrongUserAnswer { get; set; }
+
+    /// <summary>
+    /// 获取或设置最近一次完成「错题再练」交卷的时间（UTC）；有值表示已对该条做过重做标记。
+    /// </summary>
+    public DateTime? LastRedoCompletedAtUtc { get; set; }
+
+    /// <summary>
     /// 获取或设置关联用户。
     /// </summary>
     public AppUser? User { get; set; }

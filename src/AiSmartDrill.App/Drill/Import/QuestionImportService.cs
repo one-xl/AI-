@@ -139,7 +139,7 @@ public sealed class QuestionImportService
             return "题型不能为空";
 
         if (!Enum.TryParse<QuestionType>(dto.Type, true, out _))
-            return $"无效的题型：{dto.Type}，有效值为：SingleChoice, MultipleChoice, TrueFalse, ShortAnswer";
+            return $"无效的题型：{dto.Type}，有效值为：SingleChoice, MultipleChoice, TrueFalse, ShortAnswer, FillInBlank";
 
         if (string.IsNullOrWhiteSpace(dto.Difficulty))
             return "难度不能为空";

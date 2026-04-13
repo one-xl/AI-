@@ -85,6 +85,7 @@ public sealed class AppDbContext : DbContext
         {
             e.ToTable("WrongBookEntries");
             e.HasKey(x => x.Id);
+            e.Property(x => x.LastWrongUserAnswer).HasMaxLength(4000);
             e.HasIndex(x => new { x.UserId, x.QuestionId })
                 .IsUnique()
                 .HasDatabaseName("UX_WrongBook_User_Question");

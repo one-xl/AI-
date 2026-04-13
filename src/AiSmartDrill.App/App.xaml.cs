@@ -1,7 +1,7 @@
 ﻿using System.Windows;
 using AiSmartDrill.App.Drill.Ai;
-using AiSmartDrill.App.Drill.Ai.Client;
 using AiSmartDrill.App.Drill.Ai.Config;
+using AiSmartDrill.App.Drill.Ai.Doubao;
 using AiSmartDrill.App.Drill.Import;
 using AiSmartDrill.App.Infrastructure;
 using AiSmartDrill.App.ViewModels;
@@ -9,7 +9,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace AiSmartDrill.App;
 
@@ -49,14 +48,8 @@ public partial class App : System.Windows.Application
 
         services.AddSingleton<DatabaseInitializer>();
 
-        services.AddHttpClient();
-
-        // 配置豆包模型选项
-        var options = new DoubaoModelOptions();
-        configuration.GetSection(DoubaoModelOptions.SectionName).Bind(options);
-        services.AddSingleton(options);
-        services.AddSingleton<DoubaoModelConfig>();
-        services.AddHttpClient<IChatCompletionService, DoubaoApiClient>();
+        services.AddSingleton<AiCallTrace>();
+        services.AddDoubaoArkLanguageModel(configuration);
 
         services.AddSingleton<IAiTutorService, ApiAiTutorService>();
         services.AddSingleton<IQuestionRecommendationService, ApiQuestionRecommendationService>();
@@ -66,6 +59,18 @@ public partial class App : System.Windows.Application
         services.AddSingleton<MainWindowViewModel>();
 
         _serviceProvider = services.BuildServiceProvider();
+
+        var startupLogger = _serviceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
+        var doubaoCfg = _serviceProvider.GetRequiredService<DoubaoModelConfig>();
+        if (!doubaoCfg.IsValid())
+        {
+            startupLogger.LogWarning(
+                "Doubao 未配置 ApiKey 或 ModelName：请在 appsettings.json 或 User Secrets 中设置 DoubaoModel:ApiKey 与 DoubaoModel:ModelName（一般为推理接入点 ep-...）。AI 功能将失败或回退。");
+        }
+        else
+        {
+            startupLogger.LogInformation("Doubao Ark 语言模型已配置：接入点/模型标识已绑定。");
+        }
 
         var initializer = _serviceProvider.GetRequiredService<DatabaseInitializer>();
         initializer.InitializeAsync().GetAwaiter().GetResult();

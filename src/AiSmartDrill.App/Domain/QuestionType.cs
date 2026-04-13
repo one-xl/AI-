@@ -23,5 +23,10 @@ public enum QuestionType
     /// <summary>
     /// 简答题，标准答案为参考答案文本，判分时采用宽松规范化比对。
     /// </summary>
-    ShortAnswer = 3
+    ShortAnswer = 3,
+
+    /// <summary>
+    /// 填空题等主观输入题，标准答案字段存放用于判分的正则表达式（匹配用户输入即视为正确）。
+    /// </summary>
+    FillInBlank = 4
 }

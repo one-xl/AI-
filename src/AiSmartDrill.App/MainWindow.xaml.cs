@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Windows;
-using System.Windows.Controls;
 using AiSmartDrill.App.ViewModels;
 
 namespace AiSmartDrill.App;
@@ -11,6 +10,11 @@ namespace AiSmartDrill.App;
 public partial class MainWindow : Window
 {
     /// <summary>
+    /// 「考试 / 刷题」在 <see cref="MainTabControl"/> 中的索引（与 XAML 中 Tab 顺序一致）。
+    /// </summary>
+    private const int ExamTabIndex = 1;
+
+    /// <summary>
     /// 初始化主窗口。
     /// </summary>
     public MainWindow()
@@ -20,25 +24,22 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 窗口加载完成后订阅 ViewModel 事件。
+    /// 订阅 ViewModel 事件：考试开始时切换到考试标签页。
     /// </summary>
     private void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
-        if (DataContext is MainWindowViewModel viewModel)
+        if (DataContext is MainWindowViewModel vm)
         {
-            viewModel.ExamStarted += ViewModel_ExamStarted;
+            vm.ExamStarted += ViewModel_ExamStarted;
         }
     }
 
     /// <summary>
-    /// 当考试开始时，自动切换到"考试/刷题"标签页。
+    /// 任意方式成功开考后，切换到「考试 / 刷题」页（含随机组卷、错题再练、推荐题开考）。
     /// </summary>
     private void ViewModel_ExamStarted(object? sender, EventArgs e)
     {
-        Dispatcher.Invoke(() =>
-        {
-            MainTabControl.SelectedIndex = 1;
-        });
+        Dispatcher.Invoke(() => MainTabControl.SelectedIndex = ExamTabIndex);
     }
 
     /// <summary>

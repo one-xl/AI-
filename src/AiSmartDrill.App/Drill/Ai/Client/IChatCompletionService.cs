@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 namespace AiSmartDrill.App.Drill.Ai.Client;
 
 /// <summary>
-/// 聊天完成服务接口
+/// 火山方舟豆包文本对话抽象：OpenAI 兼容 <c>POST /api/v3/chat/completions</c>，由 <see cref="ArkChatCompletionClient"/> 实现。
 /// </summary>
 public interface IChatCompletionService
 {

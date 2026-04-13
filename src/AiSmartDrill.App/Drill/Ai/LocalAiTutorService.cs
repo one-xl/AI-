@@ -42,6 +42,7 @@ public sealed class LocalAiTutorService : IAiTutorService
                     QuestionType.MultipleChoice => "多选题需要检查是否漏选或多选，建议逐项排除。",
                     QuestionType.TrueFalse => "判断题建议回到定义与边界条件，避免绝对化表述误判。",
                     QuestionType.ShortAnswer => "简答题需要抓住关键词，建议先列提纲再组织语言。",
+                    QuestionType.FillInBlank => "填空题应对照判分用的正则表达式，检查是否命中应出现的关键词或格式。",
                     _ => "该题需要结合知识点复盘。"
                 };
 
