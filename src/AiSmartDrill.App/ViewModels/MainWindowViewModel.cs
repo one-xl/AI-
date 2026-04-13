@@ -23,6 +23,11 @@ namespace AiSmartDrill.App.ViewModels;
 /// </summary>
 public partial class MainWindowViewModel : ObservableObject, IDisposable
 {
+    /// <summary>
+    /// 当考试开始时触发的事件
+    /// </summary>
+    public event EventHandler? ExamStarted;
+
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly IAiTutorService _aiTutor;
     private readonly IQuestionRecommendationService _recommendation;
@@ -461,6 +466,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
 
         RenderCurrentExamQuestion();
         StatusMessage = $"考试已开始：{paper.Count} 题，倒计时 {ExamRemainingSeconds} 秒。";
+        ExamStarted?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>
@@ -502,6 +508,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
 
         RenderCurrentExamQuestion();
         StatusMessage = $"错题练习已开始：{paper.Count} 题。";
+        ExamStarted?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>
@@ -693,6 +700,13 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         try
         {
+            var dialogResult = MessageBox.Show("是否发送请求给 AI 进行题目推荐？", "AI 推荐", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (dialogResult != MessageBoxResult.Yes)
+            {
+                StatusMessage = "已取消 AI 题目推荐。";
+                return;
+            }
+
             var dto = await _recommendation.RecommendAsync(DatabaseInitializer.DemoUserId).ConfigureAwait(true);
             _recommendedQuestionIds = dto.RecommendedQuestionIds.ToList();
             
@@ -704,21 +718,21 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             StatusMessage = "AI 推荐已生成。";
             
             // 弹出提示对话框，询问用户是否开始刷题
-            var dialogResult = MessageBox.Show($"AI 已推荐 {_recommendedQuestionIds.Count} 道题目，是否开始刷题？\n\n同时生成个性化学习计划？", "AI 推荐", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+            var startExamDialog = MessageBox.Show($"AI 已推荐 {_recommendedQuestionIds.Count} 道题目，是否开始刷题？\n\n同时生成个性化学习计划？", "AI 推荐", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
             
-            if (dialogResult == MessageBoxResult.Yes)
+            if (startExamDialog == MessageBoxResult.Yes)
             {
                 // 开始刷题
                 await StartExamWithRecommendedQuestionsAsync().ConfigureAwait(true);
                 // 生成学习计划
                 await GenerateStudyPlanAsync().ConfigureAwait(true);
             }
-            else if (dialogResult == MessageBoxResult.No)
+            else if (startExamDialog == MessageBoxResult.No)
             {
                 // 只开始刷题
                 await StartExamWithRecommendedQuestionsAsync().ConfigureAwait(true);
             }
-            else if (dialogResult == MessageBoxResult.Cancel)
+            else if (startExamDialog == MessageBoxResult.Cancel)
             {
                 // 只生成学习计划
                 await GenerateStudyPlanAsync().ConfigureAwait(true);
@@ -793,6 +807,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             
             RenderCurrentExamQuestion();
             StatusMessage = $"考试已开始：{recommendedQuestions.Count} 题，倒计时 {ExamRemainingSeconds} 秒。";
+            ExamStarted?.Invoke(this, EventArgs.Empty);
             
             // 清空推荐题目ID列表，避免重复使用
             _recommendedQuestionIds.Clear();
@@ -811,6 +826,13 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task GenerateStudyPlanAsync()
     {
+        var dialogResult = MessageBox.Show("是否发送请求给 AI 生成学习计划？", "AI 学习计划", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (dialogResult != MessageBoxResult.Yes)
+        {
+            StatusMessage = "已取消 AI 学习计划生成。";
+            return;
+        }
+
         await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(true);
         var userId = DatabaseInitializer.DemoUserId;
 
@@ -860,6 +882,13 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task GenerateComprehensiveAiAnalysisAsync()
     {
+        var dialogResult = MessageBox.Show("是否发送请求给 AI 进行综合分析（错题解析、题目推荐、学习计划）？", "AI 综合分析", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (dialogResult != MessageBoxResult.Yes)
+        {
+            StatusMessage = "已取消 AI 综合分析。";
+            return;
+        }
+
         StatusMessage = "开始AI综合分析...";
         
         try

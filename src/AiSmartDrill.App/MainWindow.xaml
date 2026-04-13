@@ -23,7 +23,7 @@
             <TextBlock Opacity="0.75" Text="提示：客观题答案格式示例：单选 A；多选 A,C；判断 对/错；简答题需包含标准答案中的关键词。" TextWrapping="Wrap" />
         </Border>
 
-        <TabControl>
+        <TabControl x:Name="MainTabControl">
             <TabItem Header="题库管理">
                 <DockPanel Margin="0,10,0,0">
                     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10">

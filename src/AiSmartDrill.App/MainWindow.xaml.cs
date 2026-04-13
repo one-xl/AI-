@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Windows;
+using System.Windows.Controls;
+using AiSmartDrill.App.ViewModels;
 
 namespace AiSmartDrill.App;
 
@@ -14,6 +16,29 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        Loaded += MainWindow_Loaded;
+    }
+
+    /// <summary>
+    /// 窗口加载完成后订阅 ViewModel 事件。
+    /// </summary>
+    private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel viewModel)
+        {
+            viewModel.ExamStarted += ViewModel_ExamStarted;
+        }
+    }
+
+    /// <summary>
+    /// 当考试开始时，自动切换到"考试/刷题"标签页。
+    /// </summary>
+    private void ViewModel_ExamStarted(object? sender, EventArgs e)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            MainTabControl.SelectedIndex = 1;
+        });
     }
 
     /// <summary>
@@ -21,9 +46,13 @@ public partial class MainWindow : Window
     /// </summary>
     private void MainWindow_OnClosed(object? sender, EventArgs e)
     {
-        if (DataContext is IDisposable disposable)
+        if (DataContext is MainWindowViewModel viewModel)
         {
-            disposable.Dispose();
+            viewModel.ExamStarted -= ViewModel_ExamStarted;
+            if (viewModel is IDisposable disposable)
+            {
+                disposable.Dispose();
+            }
         }
     }
 }
