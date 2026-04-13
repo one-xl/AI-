@@ -78,23 +78,16 @@ public sealed class ApiAiTutorService : IAiTutorService
                 new
                 {
                     role = "system",
-                    content = "你是一个专业的教育AI助手，擅长分析学生的错题并提供详细的解析。请根据提供的题目信息，分析错误原因并给出详细的解题思路。"
+                    content = "教育AI助手：分析错题，提供错误原因和解题思路。"
                 },
                 new
                 {
                     role = "user",
-                    content = $"请分析以下错题：\n" +
-                              $"题目类型：{item.Type}\n" +
-                              $"题干：{item.StemSummary}\n" +
-                              $"用户答案：{item.UserAnswer}\n" +
-                              $"标准答案：{item.StandardAnswer}\n" +
-                              "请提供：1. 错误原因分析（自然语言）\n" +
-                              "2. 详细的解题思路（分步建议）\n" +
-                              "请使用JSON格式返回，包含RootCause和SolutionHints两个字段。"
+                    content = $"分析错题：类型={item.Type},题干={item.StemSummary},用户答案={item.UserAnswer},标准答案={item.StandardAnswer}\n返回JSON：{\"RootCause\":\"错误原因\",\"SolutionHints\":\"解题思路\"}"
                 }
             },
             temperature = 0.3,
-            max_tokens = 1000
+            max_tokens = 500
         };
 
         var content = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json");

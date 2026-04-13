@@ -71,28 +71,16 @@ public sealed class ApiStudyPlanService : IStudyPlanService
                 new
                 {
                     role = "system",
-                    content = "你是一个专业的教育AI助手，擅长根据学生的学习数据生成个性化的学习计划。请根据提供的用户表现摘要，生成一个合理的阶段性刷题计划。"
+                    content = "教育AI助手：根据学生学习数据生成个性化刷题计划。"
                 },
                 new
                 {
                     role = "user",
-                    content = $"请根据以下用户表现摘要生成个性化刷题计划：\n" +
-                              $"用户ID：{summary.UserId}\n" +
-                              $"总答题次数：{summary.TotalAttempts}\n" +
-                              $"正确次数：{summary.CorrectAttempts}\n" +
-                              $"错题条目数：{summary.WrongBookCount}\n" +
-                              $"高频错误知识点：{weakTagsString}\n" +
-                              "请提供：\n" +
-                              "1. 计划标题\n" +
-                              "2. 每日建议题量\n" +
-                              "3. 重点知识点标签集合\n" +
-                              "4. 阶段天数\n" +
-                              "5. 计划说明\n" +
-                              "请使用JSON格式返回，包含Title、DailyQuestionQuota、FocusKnowledgeTags、PhaseDays、Notes五个字段。"
+                    content = $"生成计划：用户ID={summary.UserId},总答题={summary.TotalAttempts},正确={summary.CorrectAttempts},错题={summary.WrongBookCount},弱项={weakTagsString}\n返回JSON：{\"Title\":\"计划标题\",\"DailyQuestionQuota\":5,\"FocusKnowledgeTags\":[\"知识点1\",\"知识点2\"],\"PhaseDays\":7,\"Notes\":\"计划说明\"}"
                 }
             },
             temperature = 0.3,
-            max_tokens = 1000
+            max_tokens = 500
         };
 
         var content = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json");
