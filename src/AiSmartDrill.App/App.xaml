@@ -148,7 +148,7 @@
                                     <Condition Property="IsMouseOver" Value="True" />
                                     <Condition Property="IsSelected" Value="False" />
                                 </MultiTrigger.Conditions>
-                                <Setter TargetName="Border" Property="Background" Value="#374151" />
+                                <Setter TargetName="Border" Property="Background" Value="#2D3748" />
                                 <Setter TargetName="Content" Property="Foreground" Value="{StaticResource Brush.Text}" />
                             </MultiTrigger>
                         </ControlTemplate.Triggers>
@@ -179,7 +179,7 @@
             <Setter Property="BorderThickness" Value="0,0,1,1" />
             <Style.Triggers>
                 <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="#374151" />
+                    <Setter Property="Background" Value="#2D3748" />
                     <Setter Property="Foreground" Value="{StaticResource Brush.Text}" />
                 </Trigger>
             </Style.Triggers>
@@ -198,11 +198,12 @@
             <Setter Property="Padding" Value="6,4" />
             <Style.Triggers>
                 <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="#374151" />
+                    <Setter Property="Background" Value="#2D3748" />
                     <Setter Property="Foreground" Value="{StaticResource Brush.Text}" />
                 </Trigger>
                 <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#1F2937" />
+                    <Setter Property="Background" Value="#2D3748" />
+                    <Setter Property="Foreground" Value="{StaticResource Brush.Text}" />
                 </Trigger>
             </Style.Triggers>
         </Style>
