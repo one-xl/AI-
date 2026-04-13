@@ -135,25 +135,16 @@ public sealed class ApiQuestionRecommendationService : IQuestionRecommendationSe
                 new
                 {
                     role = "system",
-                    content = "你是一个专业的教育AI助手，擅长根据学生的学习数据推荐适合的题目。请根据提供的用户表现摘要，推荐8道适合的题目ID。"
+                    content = "教育AI助手：根据学生学习数据推荐8道适合的题目。"
                 },
                 new
                 {
                     role = "user",
-                    content = $"请根据以下用户表现摘要推荐8道适合的题目：\n" +
-                              $"用户ID：{summary.UserId}\n" +
-                              $"总答题次数：{summary.TotalAttempts}\n" +
-                              $"正确次数：{summary.CorrectAttempts}\n" +
-                              $"错题条目数：{summary.WrongBookCount}\n" +
-                              $"高频错误知识点：{weakTagsString}\n" +
-                              "请提供：\n" +
-                              "1. 推荐理由\n" +
-                              "2. 推荐的8道题目ID列表\n" +
-                              "请使用JSON格式返回，包含Rationale和RecommendedQuestionIds两个字段。"
+                    content = $"推荐题目：用户ID={summary.UserId},总答题={summary.TotalAttempts},正确={summary.CorrectAttempts},错题={summary.WrongBookCount},弱项={weakTagsString}\n返回JSON：{\"Rationale\":\"推荐理由\",\"RecommendedQuestionIds\":[1,2,3,4,5,6,7,8]}"
                 }
             },
             temperature = 0.3,
-            max_tokens = 1000
+            max_tokens = 500
         };
 
         var content = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json");
