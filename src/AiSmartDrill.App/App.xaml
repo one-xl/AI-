@@ -112,7 +112,11 @@
                     <Setter Property="BorderBrush" Value="{StaticResource Brush.Accent}" />
                     <Setter Property="Foreground" Value="{StaticResource Brush.Text}" />
                 </Trigger>
-                <!-- 移除鼠标悬停时的样式变化 -->
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#1F2937" />
+                    <Setter Property="BorderBrush" Value="#334155" />
+                    <Setter Property="Foreground" Value="{StaticResource Brush.Text}" />
+                </Trigger>
             </Style.Triggers>
         </Style>
 
