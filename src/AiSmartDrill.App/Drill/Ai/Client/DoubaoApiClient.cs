@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 using AiSmartDrill.App.Drill.Ai.Config;
 
 namespace AiSmartDrill.App.Drill.Ai.Client
@@ -16,8 +17,9 @@ namespace AiSmartDrill.App.Drill.Ai.Client
         private readonly HttpClient _httpClient;
         private readonly DoubaoModelConfig _config;
         private readonly JsonSerializerOptions _jsonOptions;
+        private readonly ILogger<DoubaoApiClient> _logger;
 
-        public DoubaoApiClient(HttpClient httpClient, DoubaoModelConfig config)
+        public DoubaoApiClient(HttpClient httpClient, DoubaoModelConfig config, ILogger<DoubaoApiClient> logger)
         {
             _httpClient = httpClient;
             _config = config;
@@ -25,11 +27,17 @@ namespace AiSmartDrill.App.Drill.Ai.Client
             {
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase
             };
+            _logger = logger;
 
             _httpClient.BaseAddress = new Uri(config.BaseUrl);
             _httpClient.Timeout = config.Timeout;
             _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", config.ApiKey);
             _httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+            _logger.LogInformation("DoubaoApiClient 初始化完成");
+            _logger.LogInformation("BaseUrl: {BaseUrl}", config.BaseUrl);
+            _logger.LogInformation("ModelName: {ModelName}", config.ModelName);
+            _logger.LogInformation("ApiKey (前8位): {ApiKeyPrefix}", config.ApiKey.Length >= 8 ? config.ApiKey.Substring(0, 8) + "..." : "***");
         }
 
         public async Task<ChatCompletionResponse> GenerateCompletionAsync(
@@ -37,6 +45,8 @@ namespace AiSmartDrill.App.Drill.Ai.Client
             IList<ToolDefinition>? tools = null,
             CancellationToken cancellationToken = default)
         {
+            _logger.LogInformation("开始调用API，消息数: {MessageCount}", messages.Count);
+            
             // 使用标准OpenAI兼容格式
             var request = new
             {
@@ -46,25 +56,42 @@ namespace AiSmartDrill.App.Drill.Ai.Client
                 max_tokens = 1000
             };
 
+            var requestJson = JsonSerializer.Serialize(request, _jsonOptions);
+            _logger.LogDebug("请求JSON: {RequestJson}", requestJson);
+
             var requestContent = new StringContent(
-                JsonSerializer.Serialize(request, _jsonOptions),
+                requestJson,
                 Encoding.UTF8,
                 "application/json"
             );
 
-            var response = await _httpClient.PostAsync("/chat/completions", requestContent, cancellationToken);
+            var fullUrl = new Uri(_httpClient.BaseAddress, "/chat/completions");
+            _logger.LogInformation("请求URL: {FullUrl}", fullUrl);
+
             try
             {
-                response.EnsureSuccessStatusCode();
+                var response = await _httpClient.PostAsync("/chat/completions", requestContent, cancellationToken);
+                _logger.LogInformation("响应状态码: {StatusCode}", (int)response.StatusCode);
+
+                var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogDebug("响应内容: {ResponseContent}", responseContent);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogError("API调用失败，状态码: {StatusCode}, 响应: {ResponseContent}", 
+                        (int)response.StatusCode, responseContent);
+                    throw new Exception($"API 调用失败: {response.StatusCode}\n响应内容: {responseContent}");
+                }
+
+                var result = JsonSerializer.Deserialize<ChatCompletionResponse>(responseContent, _jsonOptions)!;
+                _logger.LogInformation("API调用成功，选择数: {ChoiceCount}", result.Choices?.Count ?? 0);
+                return result;
             }
             catch (HttpRequestException ex)
             {
-                var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
-                throw new Exception($"API 调用失败: {ex.Message}\n响应内容: {errorContent}", ex);
+                _logger.LogError(ex, "HTTP请求异常");
+                throw new Exception($"API 调用失败: {ex.Message}", ex);
             }
-
-            var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
-            return JsonSerializer.Deserialize<ChatCompletionResponse>(responseContent, _jsonOptions)!;
         }
 
         public async IAsyncEnumerable<ChatCompletionStreamResponse> GenerateCompletionStreamAsync(
