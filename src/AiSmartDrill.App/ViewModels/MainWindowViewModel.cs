@@ -265,6 +265,11 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _statusMessage;
 
+    /// <summary>
+    /// 存储推荐的题目ID列表，用于后续开始刷题。
+    /// </summary>
+    private List<long> _recommendedQuestionIds = new();
+
     /// <inheritdoc />
     public void Dispose()
     {
@@ -653,13 +658,100 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task RecommendAsync()
     {
-        var dto = await _recommendation.RecommendAsync(DatabaseInitializer.DemoUserId).ConfigureAwait(true);
-        var sb = new StringBuilder();
-        sb.AppendLine(dto.Rationale);
-        sb.AppendLine("推荐题目 Id：");
-        sb.AppendLine(string.Join(", ", dto.RecommendedQuestionIds));
-        AiOutputText = sb.ToString();
-        StatusMessage = "AI 推荐已生成（占位实现）。";
+        try
+        {
+            var dto = await _recommendation.RecommendAsync(DatabaseInitializer.DemoUserId).ConfigureAwait(true);
+            _recommendedQuestionIds = dto.RecommendedQuestionIds.ToList();
+            
+            var sb = new StringBuilder();
+            sb.AppendLine(dto.Rationale);
+            sb.AppendLine("推荐题目 Id：");
+            sb.AppendLine(string.Join(", ", dto.RecommendedQuestionIds));
+            AiOutputText = sb.ToString();
+            StatusMessage = "AI 推荐已生成。";
+            
+            // 弹出提示对话框，询问用户是否开始刷题
+            await ShowRecommendationDialogAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "AI 推荐失败");
+            AiOutputText = "AI 推荐失败：" + ex.Message;
+            StatusMessage = "AI 推荐失败。";
+        }
+    }
+
+    /// <summary>
+    /// 显示推荐题目提示对话框，询问用户是否开始刷题。
+    /// </summary>
+    private async Task ShowRecommendationDialogAsync()
+    {
+        if (_recommendedQuestionIds.Count == 0)
+        {
+            MessageBox.Show("推荐题目数量为0，无法开始刷题。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        
+        if (_recommendedQuestionIds.Count < ExamQuestionCount)
+        {
+            var result = MessageBox.Show($"推荐题目数量({_recommendedQuestionIds.Count})少于设定的考试题目数量({ExamQuestionCount})，是否仍要开始刷题？", "提示", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (result != MessageBoxResult.Yes)
+            {
+                return;
+            }
+        }
+        
+        var dialogResult = MessageBox.Show($"AI 已推荐 {_recommendedQuestionIds.Count} 道题目，是否开始刷题？", "AI 推荐", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (dialogResult == MessageBoxResult.Yes)
+        {
+            await StartExamWithRecommendedQuestionsAsync().ConfigureAwait(true);
+        }
+    }
+
+    /// <summary>
+    /// 使用推荐题目开始考试。
+    /// </summary>
+    private async Task StartExamWithRecommendedQuestionsAsync()
+    {
+        try
+        {
+            await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(true);
+            
+            // 从数据库中获取推荐的题目
+            var recommendedQuestions = await db.Questions.AsNoTracking()
+                .Where(q => q.IsEnabled && _recommendedQuestionIds.Contains(q.Id))
+                .ToListAsync()
+                .ConfigureAwait(true);
+            
+            if (recommendedQuestions.Count == 0)
+            {
+                MessageBox.Show("无法获取推荐题目，可能题目已被删除。", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+            
+            // 开始考试
+            _examQuestions.Clear();
+            _examQuestions.AddRange(recommendedQuestions);
+            _examSessionId = Guid.NewGuid();
+            
+            ExamRemainingSeconds = Math.Clamp(ExamMinutes, 1, 180) * 60;
+            IsExamRunning = true;
+            ExamDisplayIndex = 1;
+            ExamUserAnswer = string.Empty;
+            _examTimer.Start();
+            
+            RenderCurrentExamQuestion();
+            StatusMessage = $"考试已开始：{recommendedQuestions.Count} 题，倒计时 {ExamRemainingSeconds} 秒。";
+            
+            // 清空推荐题目ID列表，避免重复使用
+            _recommendedQuestionIds.Clear();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "使用推荐题目开始考试失败");
+            StatusMessage = "开始考试失败：" + ex.Message;
+            MessageBox.Show("开始考试失败：" + ex.Message, "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     /// <summary>
