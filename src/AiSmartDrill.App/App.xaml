@@ -41,6 +41,16 @@
             <Setter Property="Foreground" Value="{StaticResource Brush.Text}" />
             <Setter Property="BorderBrush" Value="#334155" />
             <Setter Property="Padding" Value="6" />
+            <Style.Triggers>
+                <Trigger Property="IsFocused" Value="True">
+                    <Setter Property="Background" Value="#1F2937" />
+                    <Setter Property="BorderBrush" Value="{StaticResource Brush.Accent}" />
+                </Trigger>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#1F2937" />
+                    <Setter Property="BorderBrush" Value="{StaticResource Brush.Accent}" />
+                </Trigger>
+            </Style.Triggers>
         </Style>
 
         <Style TargetType="Button">
@@ -49,6 +59,16 @@
             <Setter Property="BorderBrush" Value="#334155" />
             <Setter Property="Padding" Value="10,6" />
             <Setter Property="Margin" Value="0,0,8,8" />
+            <Style.Triggers>
+                <Trigger Property="IsPressed" Value="True">
+                    <Setter Property="Background" Value="#374151" />
+                    <Setter Property="BorderBrush" Value="{StaticResource Brush.Accent}" />
+                </Trigger>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#374151" />
+                    <Setter Property="BorderBrush" Value="{StaticResource Brush.Accent}" />
+                </Trigger>
+            </Style.Triggers>
         </Style>
 
         <Style TargetType="TabControl">
