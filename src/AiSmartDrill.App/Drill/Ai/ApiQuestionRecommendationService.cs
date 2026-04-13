@@ -154,13 +154,14 @@ public sealed class ApiQuestionRecommendationService : IQuestionRecommendationSe
         var responseContent = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         var arkResponse = JsonSerializer.Deserialize<ArkChatResponse>(responseContent);
 
-        if (arkResponse?.choices?.FirstOrDefault()?.message?.content == null)
+        var firstChoice = arkResponse?.choices?.FirstOrDefault();
+        if (firstChoice?.message?.content == null)
         {
             throw new InvalidOperationException("AI API 返回格式错误");
         }
 
         // 尝试解析AI返回的JSON
-        var aiContent = arkResponse.choices.First().message.content ?? string.Empty;
+        var aiContent = firstChoice.message.content ?? string.Empty;
         try
         {
             if (string.IsNullOrEmpty(aiContent))
