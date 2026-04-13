@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
@@ -75,7 +76,45 @@ namespace AiSmartDrill.App.Drill.Ai.Client
             }
 
             var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
-            return JsonSerializer.Deserialize<ChatCompletionResponse>(responseContent, _jsonOptions)!;
+            
+            // 解析为Doubao的/responses端点响应格式
+            var doubaoResponse = JsonSerializer.Deserialize<DoubaoResponse>(responseContent, _jsonOptions)!;
+            
+            // 转换为ChatCompletionResponse格式
+            var chatResponse = new ChatCompletionResponse
+            {
+                Id = doubaoResponse.Id,
+                Object = doubaoResponse.Object,
+                Created = doubaoResponse.Created,
+                Model = doubaoResponse.Model,
+                Usage = doubaoResponse.Usage,
+                Choices = new List<Choice>()
+            };
+
+            if (doubaoResponse.Output != null && doubaoResponse.Output.Count > 0)
+            {
+                // 提取第一个输出项的文本内容
+                var firstOutput = doubaoResponse.Output[0];
+                if (firstOutput.Content != null && firstOutput.Content.Count > 0)
+                {
+                    var textContent = string.Join("", firstOutput.Content
+                        .Where(c => c.Type == "output_text" && c.Text != null)
+                        .Select(c => c.Text));
+
+                    chatResponse.Choices.Add(new Choice
+                    {
+                        Index = 0,
+                        Message = new ChatMessage
+                        {
+                            Role = firstOutput.Role,
+                            Content = textContent
+                        },
+                        FinishReason = "stop"
+                    });
+                }
+            }
+
+            return chatResponse;
         }
 
         public async IAsyncEnumerable<ChatCompletionStreamResponse> GenerateCompletionStreamAsync(

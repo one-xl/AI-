@@ -257,3 +257,71 @@ public class StreamChoice
     /// </summary>
     public ToolCall? ToolCall { get; set; }
 }
+
+/// <summary>
+/// /responses 端点响应模型
+/// </summary>
+public class DoubaoResponse
+{
+    /// <summary>
+    /// 响应 ID
+    /// </summary>
+    public string Id { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 对象类型
+    /// </summary>
+    public string Object { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 创建时间
+    /// </summary>
+    public long Created { get; set; }
+
+    /// <summary>
+    /// 模型名称
+    /// </summary>
+    public string Model { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 输出内容
+    /// </summary>
+    public List<DoubaoOutputItem>? Output { get; set; }
+
+    /// <summary>
+    /// 使用情况
+    /// </summary>
+    public Usage? Usage { get; set; }
+}
+
+/// <summary>
+/// /responses 端点输出项
+/// </summary>
+public class DoubaoOutputItem
+{
+    /// <summary>
+    /// 角色
+    /// </summary>
+    public string Role { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 内容
+    /// </summary>
+    public List<DoubaoContentItem>? Content { get; set; }
+}
+
+/// <summary>
+/// /responses 端点内容项
+/// </summary>
+public class DoubaoContentItem
+{
+    /// <summary>
+    /// 类型
+    /// </summary>
+    public string Type { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 文本内容
+    /// </summary>
+    public string? Text { get; set; }
+}
