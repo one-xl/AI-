@@ -82,13 +82,11 @@
                                 <Setter TargetName="MainBorder" Property="Background" Value="#0B1220" />
                                 <Setter TargetName="MainBorder" Property="BorderBrush" Value="{StaticResource Brush.Accent}" />
                                 <Setter TargetName="ContentSite" Property="Foreground" Value="{StaticResource Brush.Text}" />
-                                <Setter TargetName="Arrow" Property="Fill" Value="{StaticResource Brush.Text}" />
                             </Trigger>
                             <Trigger Property="IsDropDownOpen" Value="True">
                                 <Setter TargetName="MainBorder" Property="Background" Value="#0B1220" />
                                 <Setter TargetName="MainBorder" Property="BorderBrush" Value="{StaticResource Brush.Accent}" />
                                 <Setter TargetName="ContentSite" Property="Foreground" Value="{StaticResource Brush.Text}" />
-                                <Setter TargetName="Arrow" Property="Fill" Value="{StaticResource Brush.Text}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
