@@ -72,7 +72,7 @@ public sealed class ApiAiTutorService : IAiTutorService
 
         var requestBody = new
         {
-            model = "doubao-seed-2-0-lite-260215", // 替换为您的模型ID
+            model = "Doubao-Seed-1.8-251128", // 替换为您的模型ID
             messages = new[]
             {
                 new
