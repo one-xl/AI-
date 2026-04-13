@@ -1,0 +1,18 @@
+# 按钮悬停效果修复
+
+## 问题描述
+软件的按钮在鼠标悬停时会变得特别浅以至于看不清文字。
+
+## 问题原因
+在 App.xaml 文件中，Button 样式的 IsMouseOver 触发器设置了前景色为 Brush.Accent（琥珀色），在深色背景下可能不够清晰。
+
+## 解决方案
+修改 App.xaml 文件中的 Button 样式，将 IsMouseOver 触发器的前景色从 Brush.Accent 改为 Brush.Text（浅灰色），这样在悬停时文字会保持清晰。
+
+## 修改内容
+- 文件：/workspace/src/AiSmartDrill.App/App.xaml
+- 位置：Button 样式的 IsMouseOver 触发器
+- 修改：将前景色从 `{StaticResource Brush.Accent}` 改为 `{StaticResource Brush.Text}`
+
+## 效果
+修改后，按钮在鼠标悬停时会显示清晰的文字，同时保持边框和背景的高亮效果。
