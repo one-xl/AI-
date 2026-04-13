@@ -113,8 +113,8 @@
                     <Setter Property="Foreground" Value="{StaticResource Brush.Accent}" />
                 </Trigger>
                 <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#0B1220" />
-                    <Setter Property="BorderBrush" Value="{StaticResource Brush.Accent}" />
+                    <Setter Property="Background" Value="#2D3748" />
+                    <Setter Property="BorderBrush" Value="#4A5568" />
                     <Setter Property="Foreground" Value="{StaticResource Brush.Text}" />
                 </Trigger>
             </Style.Triggers>
