@@ -373,53 +373,62 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task SaveQuestionAsync()
     {
-        if (string.IsNullOrWhiteSpace(EditorStem) || string.IsNullOrWhiteSpace(EditorStandardAnswer))
+        try
         {
-            StatusMessage = "题干与标准答案不能为空。";
-            return;
-        }
-
-        await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(false);
-        var type = MapUiToType(EditorType);
-        var diff = MapUiToDifficulty(EditorDifficulty);
-        var domain = MapUiToDomain(EditorDomain);
-
-        if (SelectedBankQuestion is null)
-        {
-            db.Questions.Add(new Question
+            if (string.IsNullOrWhiteSpace(EditorStem) || string.IsNullOrWhiteSpace(EditorStandardAnswer))
             {
-                Stem = EditorStem.Trim(),
-                StandardAnswer = EditorStandardAnswer.Trim(),
-                OptionsJson = string.IsNullOrWhiteSpace(EditorOptionsJson) ? null : EditorOptionsJson.Trim(),
-                KnowledgeTags = string.IsNullOrWhiteSpace(EditorKnowledgeTags) ? "未分类" : EditorKnowledgeTags.Trim(),
-                Type = type,
-                Difficulty = diff,
-                Domain = domain,
-                IsEnabled = true,
-                CreatedAtUtc = DateTime.UtcNow
-            });
-        }
-        else
-        {
-            var entity = await db.Questions.FirstOrDefaultAsync(x => x.Id == SelectedBankQuestion.Id).ConfigureAwait(false);
-            if (entity is null)
-            {
-                StatusMessage = "未找到要更新的题目。";
+                StatusMessage = "题干与标准答案不能为空。";
                 return;
             }
 
-            entity.Stem = EditorStem.Trim();
-            entity.StandardAnswer = EditorStandardAnswer.Trim();
-            entity.OptionsJson = string.IsNullOrWhiteSpace(EditorOptionsJson) ? null : EditorOptionsJson.Trim();
-            entity.KnowledgeTags = string.IsNullOrWhiteSpace(EditorKnowledgeTags) ? "未分类" : EditorKnowledgeTags.Trim();
-            entity.Type = type;
-            entity.Difficulty = diff;
-            entity.Domain = domain;
-        }
+            await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(false);
+            var type = MapUiToType(EditorType);
+            var diff = MapUiToDifficulty(EditorDifficulty);
+            var domain = MapUiToDomain(EditorDomain);
 
-        await db.SaveChangesAsync().ConfigureAwait(false);
-        StatusMessage = "题目已保存。";
-        await RefreshBankAsync().ConfigureAwait(false);
+            if (SelectedBankQuestion is null)
+            {
+                db.Questions.Add(new Question
+                {
+                    Stem = EditorStem.Trim(),
+                    StandardAnswer = EditorStandardAnswer.Trim(),
+                    OptionsJson = string.IsNullOrWhiteSpace(EditorOptionsJson) ? null : EditorOptionsJson.Trim(),
+                    KnowledgeTags = string.IsNullOrWhiteSpace(EditorKnowledgeTags) ? "未分类" : EditorKnowledgeTags.Trim(),
+                    Type = type,
+                    Difficulty = diff,
+                    Domain = domain,
+                    IsEnabled = true,
+                    CreatedAtUtc = DateTime.UtcNow
+                });
+            }
+            else
+            {
+                var entity = await db.Questions.FirstOrDefaultAsync(x => x.Id == SelectedBankQuestion.Id).ConfigureAwait(false);
+                if (entity is null)
+                {
+                    StatusMessage = "未找到要更新的题目。";
+                    return;
+                }
+
+                entity.Stem = EditorStem.Trim();
+                entity.StandardAnswer = EditorStandardAnswer.Trim();
+                entity.OptionsJson = string.IsNullOrWhiteSpace(EditorOptionsJson) ? null : EditorOptionsJson.Trim();
+                entity.KnowledgeTags = string.IsNullOrWhiteSpace(EditorKnowledgeTags) ? "未分类" : EditorKnowledgeTags.Trim();
+                entity.Type = type;
+                entity.Difficulty = diff;
+                entity.Domain = domain;
+            }
+
+            await db.SaveChangesAsync().ConfigureAwait(false);
+            StatusMessage = "题目已保存。";
+            await RefreshBankAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "保存题目失败");
+            StatusMessage = "保存题目失败：" + ex.Message;
+            MessageBox.Show("保存题目失败：" + ex.Message, "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     /// <summary>
