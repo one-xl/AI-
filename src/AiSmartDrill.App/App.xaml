@@ -91,6 +91,7 @@
                 </Trigger>
                 <Trigger Property="IsMouseOver" Value="True">
                     <Setter Property="Background" Value="#374151" />
+                    <Setter Property="Foreground" Value="{StaticResource Brush.Text}" />
                 </Trigger>
                 <Trigger Property="IsHighlighted" Value="True">
                     <Setter Property="Background" Value="#374151" />
@@ -142,10 +143,14 @@
                                 <Setter TargetName="Content" Property="Foreground" Value="{StaticResource Brush.Accent}" />
                                 <Setter TargetName="Border" Property="BorderBrush" Value="{StaticResource Brush.Accent}" />
                             </Trigger>
-                            <Trigger Property="IsMouseOver" Value="True">
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsMouseOver" Value="True" />
+                                    <Condition Property="IsSelected" Value="False" />
+                                </MultiTrigger.Conditions>
                                 <Setter TargetName="Border" Property="Background" Value="#374151" />
                                 <Setter TargetName="Content" Property="Foreground" Value="{StaticResource Brush.Text}" />
-                            </Trigger>
+                            </MultiTrigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
