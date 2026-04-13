@@ -19,11 +19,6 @@ public class DoubaoApiClient : IChatCompletionService
     private readonly DoubaoModelConfig _config;
     private readonly JsonSerializerOptions _jsonOptions;
 
-    /// <summary>
-    /// 初始化 <see cref="DoubaoApiClient"/> 的新实例
-    /// </summary>
-    /// <param name="httpClient">HTTP 客户端</param>
-    /// <param name="config">豆包模型配置</param>
     public DoubaoApiClient(HttpClient httpClient, DoubaoModelConfig config)
     {
         _httpClient = httpClient;
@@ -33,13 +28,11 @@ public class DoubaoApiClient : IChatCompletionService
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         };
 
-        // 配置 HTTP 客户端
         _httpClient.BaseAddress = new Uri(config.BaseUrl);
         _httpClient.Timeout = config.Timeout;
         _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", config.ApiKey);
         _httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-    /// <inheritdoc />
     public async Task<ChatCompletionResponse> GenerateCompletionAsync(
         IList<ChatMessage> messages,
         IList<ToolDefinition>? tools = null,
@@ -69,7 +62,6 @@ public class DoubaoApiClient : IChatCompletionService
         return JsonSerializer.Deserialize<ChatCompletionResponse>(responseContent, _jsonOptions)!;
     }
 
-    /// <inheritdoc />
     public async IAsyncEnumerable<ChatCompletionStreamResponse> GenerateCompletionStreamAsync(
         IList<ChatMessage> messages,
         IList<ToolDefinition>? tools = null,
@@ -92,11 +84,13 @@ public class DoubaoApiClient : IChatCompletionService
             "application/json"
         );
 
+        var httpRequest = new HttpRequestMessage(HttpMethod.Post, "/chat/completions")
+        {
+            Content = requestContent
+        };
+
         using var response = await _httpClient.SendAsync(
-            new HttpRequestMessage(HttpMethod.Post, "/chat/completions")
-            {
-                Content = requestContent
-            },
+            httpRequest,
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken
         );
@@ -114,13 +108,11 @@ public class DoubaoApiClient : IChatCompletionService
             if (string.IsNullOrWhiteSpace(line))
                 continue;
 
-            // 处理 SSE 格式，移除 "data: " 前缀
             if (line.StartsWith("data: "))
             {
                 line = line[6..];
             }
 
-            // 检查是否是结束消息
             if (line == "[DONE]")
             {
                 break;
@@ -133,7 +125,6 @@ public class DoubaoApiClient : IChatCompletionService
             }
             catch (JsonException)
             {
-                // 忽略解析错误，继续处理下一行
             }
 
             if (streamResponse != null)
