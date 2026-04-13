@@ -38,7 +38,8 @@ public partial class App : System.Windows.Application
         services.AddLogging(builder =>
         {
             builder.AddDebug();
-            builder.SetMinimumLevel(LogLevel.Information);
+            builder.AddConsole();
+            builder.SetMinimumLevel(LogLevel.Debug);
         });
 
         var connectionString = configuration.GetConnectionString("Default")

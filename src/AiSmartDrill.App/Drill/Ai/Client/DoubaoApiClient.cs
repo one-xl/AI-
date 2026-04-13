@@ -47,6 +47,22 @@ namespace AiSmartDrill.App.Drill.Ai.Client
         {
             _logger.LogInformation("开始调用API，消息数: {MessageCount}", messages.Count);
             
+            // 打印第一条消息内容（通常是用户问题）
+            if (messages.Count > 0)
+            {
+                var firstMessage = messages[0];
+                _logger.LogDebug("第一条消息角色: {Role}, 内容长度: {ContentLength}", 
+                    firstMessage.Role, firstMessage.Content?.Length ?? 0);
+                if (firstMessage.Content?.Length > 0 && firstMessage.Content.Length < 200)
+                {
+                    _logger.LogDebug("第一条消息内容: {Content}", firstMessage.Content);
+                }
+                else if (firstMessage.Content?.Length >= 200)
+                {
+                    _logger.LogDebug("第一条消息内容(前200字符): {Content}", firstMessage.Content?.Substring(0, 200) + "...");
+                }
+            }
+            
             // 使用标准OpenAI兼容格式
             var request = new
             {
@@ -67,11 +83,19 @@ namespace AiSmartDrill.App.Drill.Ai.Client
 
             var fullUrl = new Uri(new Uri(_config.BaseUrl), "/chat/completions");
             _logger.LogInformation("请求URL: {FullUrl}", fullUrl);
+            _logger.LogInformation("模型: {ModelName}", _config.ModelName);
+            _logger.LogInformation("超时设置: {TimeoutSeconds}秒", _config.Timeout.TotalSeconds);
 
             try
             {
+                _logger.LogInformation("开始发送请求...");
+                var startTime = DateTime.UtcNow;
                 var response = await _httpClient.PostAsync("/chat/completions", requestContent, cancellationToken);
-                _logger.LogInformation("响应状态码: {StatusCode}", (int)response.StatusCode);
+                var endTime = DateTime.UtcNow;
+                var duration = endTime - startTime;
+                
+                _logger.LogInformation("响应状态码: {StatusCode}, 耗时: {Duration}ms", 
+                    (int)response.StatusCode, (int)duration.TotalMilliseconds);
 
                 var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
                 _logger.LogDebug("响应内容: {ResponseContent}", responseContent);
@@ -85,11 +109,33 @@ namespace AiSmartDrill.App.Drill.Ai.Client
 
                 var result = JsonSerializer.Deserialize<ChatCompletionResponse>(responseContent, _jsonOptions)!;
                 _logger.LogInformation("API调用成功，选择数: {ChoiceCount}", result.Choices?.Count ?? 0);
+                
+                // 打印响应内容摘要
+                if (result.Choices != null && result.Choices.Count > 0)
+                {
+                    var firstChoice = result.Choices[0];
+                    var contentLength = firstChoice.Message?.Content?.Length ?? 0;
+                    _logger.LogDebug("响应内容长度: {ContentLength}", contentLength);
+                    if (contentLength > 0 && contentLength < 200)
+                    {
+                        _logger.LogDebug("响应内容: {Content}", firstChoice.Message?.Content);
+                    }
+                    else if (contentLength >= 200)
+                    {
+                        _logger.LogDebug("响应内容(前200字符): {Content}", firstChoice.Message?.Content?.Substring(0, 200) + "...");
+                    }
+                }
+                
                 return result;
             }
             catch (HttpRequestException ex)
             {
                 _logger.LogError(ex, "HTTP请求异常");
+                throw new Exception($"API 调用失败: {ex.Message}", ex);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "API调用异常");
                 throw new Exception($"API 调用失败: {ex.Message}", ex);
             }
         }
