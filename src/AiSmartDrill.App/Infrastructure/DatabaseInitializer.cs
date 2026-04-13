@@ -1,3 +1,4 @@
+using System.IO;
 using AiSmartDrill.App.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
