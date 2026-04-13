@@ -38,7 +38,6 @@ public class DoubaoApiClient : IChatCompletionService
         _httpClient.Timeout = config.Timeout;
         _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", config.ApiKey);
         _httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-    }
 
     /// <inheritdoc />
     public async Task<ChatCompletionResponse> GenerateCompletionAsync(
@@ -93,9 +92,11 @@ public class DoubaoApiClient : IChatCompletionService
             "application/json"
         );
 
-        using var response = await _httpClient.PostAsync(
-            "/chat/completions",
-            requestContent,
+        using var response = await _httpClient.SendAsync(
+            new HttpRequestMessage(HttpMethod.Post, "/chat/completions")
+            {
+                Content = requestContent
+            },
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken
         );
@@ -125,17 +126,19 @@ public class DoubaoApiClient : IChatCompletionService
                 break;
             }
 
+            ChatCompletionStreamResponse? streamResponse = null;
             try
             {
-                var streamResponse = JsonSerializer.Deserialize<ChatCompletionStreamResponse>(line, _jsonOptions);
-                if (streamResponse != null)
-                {
-                    yield return streamResponse;
-                }
+                streamResponse = JsonSerializer.Deserialize<ChatCompletionStreamResponse>(line, _jsonOptions);
             }
             catch (JsonException)
             {
                 // 忽略解析错误，继续处理下一行
+            }
+
+            if (streamResponse != null)
+            {
+                yield return streamResponse;
             }
         }
     }
