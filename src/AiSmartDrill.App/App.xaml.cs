@@ -45,8 +45,10 @@ public partial class App : System.Windows.Application
 
         services.AddSingleton<DatabaseInitializer>();
 
+        services.AddHttpClient();
+
         services.AddSingleton<IAiTutorService, LocalAiTutorService>();
-        services.AddSingleton<IQuestionRecommendationService, LocalQuestionRecommendationService>();
+        services.AddSingleton<IQuestionRecommendationService, ApiQuestionRecommendationService>();
         services.AddSingleton<IStudyPlanService, LocalStudyPlanService>();
         services.AddSingleton<QuestionImportService>();
 
