@@ -114,29 +114,97 @@ public sealed class ApiQuestionRecommendationService : IQuestionRecommendationSe
 
     private async Task<QuestionRecommendationDto> CallAiApiAsync(UserPerformanceSummary summary, CancellationToken cancellationToken)
     {
-        var endpoint = _configuration["Ai:Endpoint"];
+        var endpoint = _configuration["Ai:Endpoint"] ?? "https://ark.cn-beijing.volces.com/api/v3/chat/completions";
         var apiKey = _configuration["Ai:ApiKey"];
 
-        if (string.IsNullOrEmpty(endpoint) || string.IsNullOrEmpty(apiKey))
+        if (string.IsNullOrEmpty(apiKey))
         {
-            throw new InvalidOperationException("AI API 配置未设置");
+            throw new InvalidOperationException("AI API 密钥未设置");
         }
 
         var client = _httpClientFactory.CreateClient();
         client.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
 
-        var requestBody = JsonSerializer.Serialize(summary);
-        var content = new StringContent(requestBody, Encoding.UTF8, "application/json");
+        var weakTagsString = string.Join(", ", summary.WeakTags);
 
-        var response = await client.PostAsync($"{endpoint}/recommend-questions", content, cancellationToken).ConfigureAwait(false);
+        var requestBody = new
+        {
+            model = "ep-20260413170846-xqxj7", // 替换为您的模型ID
+            messages = new[]
+            {
+                new
+                {
+                    role = "system",
+                    content = "你是一个专业的教育AI助手，擅长根据学生的学习数据推荐适合的题目。请根据提供的用户表现摘要，推荐8道适合的题目ID。"
+                },
+                new
+                {
+                    role = "user",
+                    content = $"请根据以下用户表现摘要推荐8道适合的题目：\n" +
+                              $"用户ID：{summary.UserId}\n" +
+                              $"总答题次数：{summary.TotalAttempts}\n" +
+                              $"正确次数：{summary.CorrectAttempts}\n" +
+                              $"错题条目数：{summary.WrongBookCount}\n" +
+                              $"高频错误知识点：{weakTagsString}\n" +
+                              "请提供：\n" +
+                              "1. 推荐理由\n" +
+                              "2. 推荐的8道题目ID列表\n" +
+                              "请使用JSON格式返回，包含Rationale和RecommendedQuestionIds两个字段。"
+                }
+            },
+            temperature = 0.3,
+            max_tokens = 1000
+        };
+
+        var content = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json");
+        var response = await client.PostAsync(endpoint, content, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
 
         var responseContent = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-        return JsonSerializer.Deserialize<QuestionRecommendationDto>(responseContent) ?? new QuestionRecommendationDto();
+        var arkResponse = JsonSerializer.Deserialize<ArkChatResponse>(responseContent);
+
+        if (arkResponse?.choices?.FirstOrDefault()?.message?.content == null)
+        {
+            throw new InvalidOperationException("AI API 返回格式错误");
+        }
+
+        // 尝试解析AI返回的JSON
+        try
+        {
+            var recommendation = JsonSerializer.Deserialize<QuestionRecommendationDto>(arkResponse.choices.First().message.content);
+            return recommendation ?? new QuestionRecommendationDto();
+        }
+        catch
+        {
+            // 如果AI返回的不是JSON格式，使用默认推荐
+            return await FallbackToLocalRecommendationAsync(null, summary.UserId, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private class ArkChatResponse
+    {
+        public List<Choice> choices { get; set; }
+
+        public class Choice
+        {
+            public Message message { get; set; }
+
+            public class Message
+            {
+                public string content { get; set; }
+            }
+        }
     }
 
     private async Task<QuestionRecommendationDto> FallbackToLocalRecommendationAsync(AppDbContext db, long userId, CancellationToken cancellationToken)
     {
+        // 如果db为null，创建一个新的数据库上下文
+        if (db == null)
+        {
+            await using var newDb = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+            return await FallbackToLocalRecommendationAsync(newDb, userId, cancellationToken).ConfigureAwait(false);
+        }
+
         // 从题库中挑选最近的题目作为回退
         var recentQuestions = await db.Questions.AsNoTracking()
             .Where(q => q.IsEnabled)

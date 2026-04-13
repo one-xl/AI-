@@ -47,9 +47,9 @@ public partial class App : System.Windows.Application
 
         services.AddHttpClient();
 
-        services.AddSingleton<IAiTutorService, LocalAiTutorService>();
+        services.AddSingleton<IAiTutorService, ApiAiTutorService>();
         services.AddSingleton<IQuestionRecommendationService, ApiQuestionRecommendationService>();
-        services.AddSingleton<IStudyPlanService, LocalStudyPlanService>();
+        services.AddSingleton<IStudyPlanService, ApiStudyPlanService>();
         services.AddSingleton<QuestionImportService>();
 
         services.AddSingleton<MainWindowViewModel>();
