@@ -35,91 +35,131 @@ public sealed class DatabaseInitializer
     /// <returns>表示异步操作的任务。</returns>
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
-
-        // 演示环境：使用 EnsureCreated 避免引入迁移复杂度；生产环境应改用 Migrate。
-        await db.Database.EnsureCreatedAsync(cancellationToken).ConfigureAwait(false);
-
-        if (await db.Users.AnyAsync(cancellationToken).ConfigureAwait(false))
+        try
         {
-            _logger.LogInformation("数据库已存在演示数据，跳过种子写入。");
-            return;
+            await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+
+            // 尝试检查数据库是否需要重建（因为我们添加了新列）
+            bool needsRebuild = false;
+            try
+            {
+                // 尝试查询是否有 Domain 列
+                _ = await db.Questions.FirstOrDefaultAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Microsoft.Data.Sqlite.SqliteException)
+            {
+                // 如果查询失败，说明数据库结构不匹配，需要重建
+                needsRebuild = true;
+                _logger.LogInformation("检测到数据库结构不匹配，准备重建数据库...");
+            }
+
+            // 如果需要重建，先删除旧数据库文件
+            if (needsRebuild)
+            {
+                var dbPath = db.Database.GetDbConnection().DataSource;
+                if (File.Exists(dbPath))
+                {
+                    try
+                    {
+                        File.Delete(dbPath);
+                        _logger.LogInformation("已删除旧数据库文件：{DbPath}", dbPath);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "删除旧数据库文件失败，尝试继续...");
+                    }
+                }
+            }
+
+            // 演示环境：使用 EnsureCreated 避免引入迁移复杂度；生产环境应改用 Migrate。
+            await db.Database.EnsureCreatedAsync(cancellationToken).ConfigureAwait(false);
+
+            if (await db.Users.AnyAsync(cancellationToken).ConfigureAwait(false))
+            {
+                _logger.LogInformation("数据库已存在演示数据，跳过种子写入。");
+                return;
+            }
+
+            _logger.LogInformation("写入演示种子数据...");
+
+            var demoUser = new AppUser
+            {
+                Id = DemoUserId,
+                DisplayName = "演示学员",
+                CreatedAtUtc = DateTime.UtcNow
+            };
+
+            db.Users.Add(demoUser);
+
+            var questions = BuildSeedQuestions(DateTime.UtcNow);
+            db.Questions.AddRange(questions);
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+
+            // 预置若干历史答题与错题，便于统计与筛选演示。
+            var sessionA = Guid.Parse("11111111-1111-1111-1111-111111111111");
+            var q1 = questions[0];
+            var q2 = questions[1];
+            var q3 = questions[2];
+
+            db.AnswerRecords.AddRange(
+                new AnswerRecord
+                {
+                    UserId = DemoUserId,
+                    QuestionId = q1.Id,
+                    SessionId = sessionA,
+                    UserAnswer = "A",
+                    IsCorrect = true,
+                    Score = 1m,
+                    DurationMs = 1200,
+                    CreatedAtUtc = DateTime.UtcNow.AddDays(-2)
+                },
+                new AnswerRecord
+                {
+                    UserId = DemoUserId,
+                    QuestionId = q2.Id,
+                    SessionId = sessionA,
+                    UserAnswer = "错",
+                    IsCorrect = false,
+                    Score = 0m,
+                    DurationMs = 5400,
+                    CreatedAtUtc = DateTime.UtcNow.AddDays(-2)
+                },
+                new AnswerRecord
+                {
+                    UserId = DemoUserId,
+                    QuestionId = q3.Id,
+                    SessionId = sessionA,
+                    UserAnswer = "B",
+                    IsCorrect = false,
+                    Score = 0m,
+                    DurationMs = 8000,
+                    CreatedAtUtc = DateTime.UtcNow.AddDays(-2)
+                });
+
+            db.WrongBookEntries.AddRange(
+                new WrongBookEntry
+                {
+                    UserId = DemoUserId,
+                    QuestionId = q2.Id,
+                    WrongCount = 2,
+                    LastWrongAtUtc = DateTime.UtcNow.AddDays(-1)
+                },
+                new WrongBookEntry
+                {
+                    UserId = DemoUserId,
+                    QuestionId = q3.Id,
+                    WrongCount = 1,
+                    LastWrongAtUtc = DateTime.UtcNow.AddDays(-2)
+                });
+
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            _logger.LogInformation("演示种子数据写入完成。");
         }
-
-        _logger.LogInformation("写入演示种子数据...");
-
-        var demoUser = new AppUser
+        catch (Exception ex)
         {
-            Id = DemoUserId,
-            DisplayName = "演示学员",
-            CreatedAtUtc = DateTime.UtcNow
-        };
-
-        db.Users.Add(demoUser);
-
-        var questions = BuildSeedQuestions(DateTime.UtcNow);
-        db.Questions.AddRange(questions);
-        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-
-        // 预置若干历史答题与错题，便于统计与筛选演示。
-        var sessionA = Guid.Parse("11111111-1111-1111-1111-111111111111");
-        var q1 = questions[0];
-        var q2 = questions[1];
-        var q3 = questions[2];
-
-        db.AnswerRecords.AddRange(
-            new AnswerRecord
-            {
-                UserId = DemoUserId,
-                QuestionId = q1.Id,
-                SessionId = sessionA,
-                UserAnswer = "A",
-                IsCorrect = true,
-                Score = 1m,
-                DurationMs = 1200,
-                CreatedAtUtc = DateTime.UtcNow.AddDays(-2)
-            },
-            new AnswerRecord
-            {
-                UserId = DemoUserId,
-                QuestionId = q2.Id,
-                SessionId = sessionA,
-                UserAnswer = "错",
-                IsCorrect = false,
-                Score = 0m,
-                DurationMs = 5400,
-                CreatedAtUtc = DateTime.UtcNow.AddDays(-2)
-            },
-            new AnswerRecord
-            {
-                UserId = DemoUserId,
-                QuestionId = q3.Id,
-                SessionId = sessionA,
-                UserAnswer = "B",
-                IsCorrect = false,
-                Score = 0m,
-                DurationMs = 8000,
-                CreatedAtUtc = DateTime.UtcNow.AddDays(-2)
-            });
-
-        db.WrongBookEntries.AddRange(
-            new WrongBookEntry
-            {
-                UserId = DemoUserId,
-                QuestionId = q2.Id,
-                WrongCount = 2,
-                LastWrongAtUtc = DateTime.UtcNow.AddDays(-1)
-            },
-            new WrongBookEntry
-            {
-                UserId = DemoUserId,
-                QuestionId = q3.Id,
-                WrongCount = 1,
-                LastWrongAtUtc = DateTime.UtcNow.AddDays(-2)
-            });
-
-        await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-        _logger.LogInformation("演示种子数据写入完成。");
+            _logger.LogError(ex, "数据库初始化失败");
+            throw;
+        }
     }
 
     /// <summary>
