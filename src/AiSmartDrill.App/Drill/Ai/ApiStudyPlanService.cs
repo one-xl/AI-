@@ -76,7 +76,7 @@ public sealed class ApiStudyPlanService : IStudyPlanService
                 new
                 {
                     role = "user",
-                    content = $"生成计划：用户ID={summary.UserId},总答题={summary.TotalAttempts},正确={summary.CorrectAttempts},错题={summary.WrongBookCount},弱项={weakTagsString}\n返回JSON：{\"Title\":\"计划标题\",\"DailyQuestionQuota\":5,\"FocusKnowledgeTags\":[\"知识点1\",\"知识点2\"],\"PhaseDays\":7,\"Notes\":\"计划说明\"}"
+                    content = $"生成计划：用户ID={summary.UserId},总答题={summary.TotalAttempts},正确={summary.CorrectAttempts},错题={summary.WrongBookCount},弱项={weakTagsString}\n\n严格要求：仅返回JSON格式，包含Title、DailyQuestionQuota、FocusKnowledgeTags、PhaseDays、Notes五个字段，不要包含其他任何文本。\n示例：{\"Title\":\"计划标题\",\"DailyQuestionQuota\":5,\"FocusKnowledgeTags\":[\"知识点1\",\"知识点2\"],\"PhaseDays\":7,\"Notes\":\"计划说明\"}"
                 }
             },
             temperature = 0.3,
