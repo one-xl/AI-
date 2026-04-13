@@ -1,8 +1,6 @@
 using AiSmartDrill.App.Domain;
-using Microsoft.Extensions.Configuration;
+using AiSmartDrill.App.Drill.Ai.Client;
 using Microsoft.Extensions.Logging;
-using System.Net.Http;
-using System.Text;
 using System.Text.Json;
 
 namespace AiSmartDrill.App.Drill.Ai;
@@ -12,23 +10,19 @@ namespace AiSmartDrill.App.Drill.Ai;
 /// </summary>
 public sealed class ApiAiTutorService : IAiTutorService
 {
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly IConfiguration _configuration;
+    private readonly IChatCompletionService _chatCompletionService;
     private readonly ILogger<ApiAiTutorService> _logger;
 
     /// <summary>
     /// 初始化 <see cref="ApiAiTutorService"/> 的新实例。
     /// </summary>
-    /// <param name="httpClientFactory">HTTP客户端工厂。</param>
-    /// <param name="configuration">配置。</param>
+    /// <param name="chatCompletionService">聊天完成服务。</param>
     /// <param name="logger">日志记录器。</param>
     public ApiAiTutorService(
-        IHttpClientFactory httpClientFactory,
-        IConfiguration configuration,
+        IChatCompletionService chatCompletionService,
         ILogger<ApiAiTutorService> logger)
     {
-        _httpClientFactory = httpClientFactory;
-        _configuration = configuration;
+        _chatCompletionService = chatCompletionService;
         _logger = logger;
     }
 
@@ -59,52 +53,24 @@ public sealed class ApiAiTutorService : IAiTutorService
 
     private async Task<WrongQuestionInsightDto> AnalyzeSingleQuestionAsync(WrongQuestionInsightDto item, CancellationToken cancellationToken)
     {
-        var endpoint = _configuration["Ai:Endpoint"] ?? "https://ark.cn-beijing.volces.com/api/v3/chat/completions";
-        var apiKey = _configuration["Ai:ApiKey"];
-
-        if (string.IsNullOrEmpty(apiKey))
+        var messages = new List<ChatMessage>
         {
-            throw new InvalidOperationException("AI API 密钥未设置");
-        }
-
-        var client = _httpClientFactory.CreateClient();
-        client.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
-
-        var requestBody = new
-        {
-            model = "Doubao-Seed-1.8-251128", // 替换为您的模型ID
-            messages = new[]
+            new ChatMessage
             {
-                new
-                {
-                    role = "system",
-                    content = "教育AI助手：分析错题，提供错误原因和解题思路。"
-                },
-                new
-                {
-                    role = "user",
-                    content = string.Format("分析错题：类型={0},题干={1},用户答案={2},标准答案={3}\n\n严格要求：仅返回JSON格式，包含RootCause和SolutionHints两个字段，不要包含其他任何文本。\n示例：{{\"RootCause\":\"错误原因\",\"SolutionHints\":\"解题思路\"}}" , item.Type, item.StemSummary, item.UserAnswer, item.StandardAnswer)
-                }
+                Role = "system",
+                Content = "教育AI助手：分析错题，提供错误原因和解题思路。"
             },
-            temperature = 0.3,
-            max_tokens = 500
+            new ChatMessage
+            {
+                Role = "user",
+                Content = string.Format("分析错题：类型={0},题干={1},用户答案={2},标准答案={3}\n\n严格要求：仅返回JSON格式，包含RootCause和SolutionHints两个字段，不要包含其他任何文本。\n示例：{{\"RootCause\":\"错误原因\",\"SolutionHints\":\"解题思路\"}}" , item.Type, item.StemSummary, item.UserAnswer, item.StandardAnswer)
+            }
         };
 
-        var content = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json");
-        var response = await client.PostAsync(endpoint, content, cancellationToken).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
-
-        var responseContent = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-        var arkResponse = JsonSerializer.Deserialize<ArkChatResponse>(responseContent);
-
-        var firstChoice = arkResponse?.choices?.FirstOrDefault();
-        if (firstChoice?.message?.content == null)
-        {
-            throw new InvalidOperationException("AI API 返回格式错误");
-        }
+        var response = await _chatCompletionService.GenerateCompletionAsync(messages, null, cancellationToken).ConfigureAwait(false);
 
         // 尝试解析AI返回的JSON
-        var aiContent = firstChoice.message.content ?? string.Empty;
+        var aiContent = response.Choices?.FirstOrDefault()?.Message?.Content ?? string.Empty;
         try
         {
             if (string.IsNullOrEmpty(aiContent))
@@ -174,20 +140,7 @@ public sealed class ApiAiTutorService : IAiTutorService
         return results;
     }
 
-    private class ArkChatResponse
-    {
-        public List<Choice>? choices { get; set; }
 
-        public class Choice
-        {
-            public Message? message { get; set; }
-
-            public class Message
-            {
-                public string? content { get; set; }
-            }
-        }
-    }
 
     private class AnalysisResult
     {
