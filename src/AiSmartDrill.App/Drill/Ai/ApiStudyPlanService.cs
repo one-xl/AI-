@@ -65,7 +65,7 @@ public sealed class ApiStudyPlanService : IStudyPlanService
 
         var requestBody = new
         {
-            model = "ep-20260413170846-xqxj7", // 替换为您的模型ID
+            model = "doubao-seed-2-0-lite-260215", // 替换为您的模型ID
             messages = new[]
             {
                 new
