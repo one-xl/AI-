@@ -96,9 +96,9 @@ public sealed class ApiStudyPlanService : IStudyPlanService
         }
 
         // 尝试解析AI返回的JSON
+        var content = arkResponse.choices.First().message.content ?? string.Empty;
         try
         {
-            var content = arkResponse.choices.First().message.content;
             if (string.IsNullOrEmpty(content))
             {
                 throw new InvalidOperationException("AI API 返回内容为空");

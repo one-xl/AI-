@@ -103,9 +103,9 @@ public sealed class ApiAiTutorService : IAiTutorService
         }
 
         // 尝试解析AI返回的JSON
+        var content = arkResponse.choices.First().message.content ?? string.Empty;
         try
         {
-            var content = arkResponse.choices.First().message.content;
             if (string.IsNullOrEmpty(content))
             {
                 throw new InvalidOperationException("AI API 返回内容为空");
@@ -125,7 +125,6 @@ public sealed class ApiAiTutorService : IAiTutorService
         catch
         {
             // 如果AI返回的不是JSON格式，直接使用内容
-            var content = arkResponse.choices.First().message.content;
             return new WrongQuestionInsightDto
             {
                 QuestionId = item.QuestionId,
