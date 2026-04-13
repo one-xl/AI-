@@ -70,6 +70,10 @@
                                 <Setter TargetName="MainBorder" Property="Background" Value="#1F2937" />
                                 <Setter TargetName="MainBorder" Property="BorderBrush" Value="{StaticResource Brush.Accent}" />
                             </Trigger>
+                            <Trigger Property="IsDropDownOpen" Value="True">
+                                <Setter TargetName="MainBorder" Property="Background" Value="#1F2937" />
+                                <Setter TargetName="MainBorder" Property="BorderBrush" Value="{StaticResource Brush.Accent}" />
+                            </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
