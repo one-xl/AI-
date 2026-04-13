@@ -139,6 +139,7 @@
                         <Button Content="刷新错题本" Command="{Binding RefreshWrongBookCommand}" />
                         <Button Content="错题再练（组卷）" Command="{Binding StartWrongBookPracticeCommand}" />
                         <Button Content="AI 题目推荐" Command="{Binding RecommendCommand}" />
+                        <Button Content="AI 综合分析" Command="{Binding GenerateComprehensiveAiAnalysisCommand}" />
                     </WrapPanel>
 
                     <Grid>
