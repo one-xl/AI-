@@ -38,7 +38,6 @@ public partial class App : System.Windows.Application
         services.AddLogging(builder =>
         {
             builder.AddDebug();
-            builder.AddConsole();
             builder.SetMinimumLevel(LogLevel.Debug);
         });
 
