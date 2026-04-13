@@ -37,23 +37,11 @@ namespace AiSmartDrill.App.Drill.Ai.Client
             IList<ToolDefinition>? tools = null,
             CancellationToken cancellationToken = default)
         {
-            // 转换消息格式以匹配官方 API
-            var inputMessages = new List<object>();
-            foreach (var message in messages)
-            {
-                var content = new List<object>();
-                content.Add(new { type = "input_text", text = message.Content });
-                
-                inputMessages.Add(new {
-                    role = message.Role,
-                    content = content
-                });
-            }
-
+            // 使用标准OpenAI兼容格式
             var request = new
             {
                 model = _config.ModelName,
-                input = inputMessages,
+                messages = messages,
                 temperature = 0.7,
                 max_tokens = 1000
             };
@@ -64,7 +52,7 @@ namespace AiSmartDrill.App.Drill.Ai.Client
                 "application/json"
             );
 
-            var response = await _httpClient.PostAsync("/responses", requestContent, cancellationToken);
+            var response = await _httpClient.PostAsync("/chat/completions", requestContent, cancellationToken);
             try
             {
                 response.EnsureSuccessStatusCode();
@@ -76,45 +64,7 @@ namespace AiSmartDrill.App.Drill.Ai.Client
             }
 
             var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
-            
-            // 解析为Doubao的/responses端点响应格式
-            var doubaoResponse = JsonSerializer.Deserialize<DoubaoResponse>(responseContent, _jsonOptions)!;
-            
-            // 转换为ChatCompletionResponse格式
-            var chatResponse = new ChatCompletionResponse
-            {
-                Id = doubaoResponse.Id,
-                Object = doubaoResponse.Object,
-                Created = doubaoResponse.Created,
-                Model = doubaoResponse.Model,
-                Usage = doubaoResponse.Usage,
-                Choices = new List<Choice>()
-            };
-
-            if (doubaoResponse.Output != null && doubaoResponse.Output.Count > 0)
-            {
-                // 提取第一个输出项的文本内容
-                var firstOutput = doubaoResponse.Output[0];
-                if (firstOutput.Content != null && firstOutput.Content.Count > 0)
-                {
-                    var textContent = string.Join("", firstOutput.Content
-                        .Where(c => c.Type == "output_text" && c.Text != null)
-                        .Select(c => c.Text));
-
-                    chatResponse.Choices.Add(new Choice
-                    {
-                        Index = 0,
-                        Message = new ChatMessage
-                        {
-                            Role = firstOutput.Role,
-                            Content = textContent
-                        },
-                        FinishReason = "stop"
-                    });
-                }
-            }
-
-            return chatResponse;
+            return JsonSerializer.Deserialize<ChatCompletionResponse>(responseContent, _jsonOptions)!;
         }
 
         public async IAsyncEnumerable<ChatCompletionStreamResponse> GenerateCompletionStreamAsync(
@@ -122,23 +72,11 @@ namespace AiSmartDrill.App.Drill.Ai.Client
             IList<ToolDefinition>? tools = null,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            // 转换消息格式以匹配官方 API
-            var inputMessages = new List<object>();
-            foreach (var message in messages)
-            {
-                var content = new List<object>();
-                content.Add(new { type = "input_text", text = message.Content });
-                
-                inputMessages.Add(new {
-                    role = message.Role,
-                    content = content
-                });
-            }
-
+            // 使用标准OpenAI兼容格式
             var request = new
             {
                 model = _config.ModelName,
-                input = inputMessages,
+                messages = messages,
                 temperature = 0.7,
                 max_tokens = 1000,
                 stream = true
@@ -150,7 +88,7 @@ namespace AiSmartDrill.App.Drill.Ai.Client
                 "application/json"
             );
 
-            var httpRequest = new HttpRequestMessage(HttpMethod.Post, "/responses")
+            var httpRequest = new HttpRequestMessage(HttpMethod.Post, "/chat/completions")
             {
                 Content = requestContent
             };
