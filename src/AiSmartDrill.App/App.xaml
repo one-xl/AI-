@@ -94,6 +94,19 @@
         <Style TargetType="TabItem">
             <Setter Property="Padding" Value="12,8" />
             <Setter Property="Foreground" Value="#CBD5E1" />
+            <Setter Property="Background" Value="#1F2937" />
+            <Setter Property="BorderBrush" Value="#334155" />
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="#0B1220" />
+                    <Setter Property="Foreground" Value="{StaticResource Brush.Accent}" />
+                    <Setter Property="BorderBrush" Value="{StaticResource Brush.Accent}" />
+                </Trigger>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="#374151" />
+                    <Setter Property="Foreground" Value="{StaticResource Brush.Text}" />
+                </Trigger>
+            </Style.Triggers>
         </Style>
 
         <Style TargetType="DataGrid">
