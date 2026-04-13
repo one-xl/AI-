@@ -1,5 +1,3 @@
-using Microsoft.Extensions.Options;
-
 namespace AiSmartDrill.App.Drill.Ai.Config;
 
 /// <summary>
@@ -13,9 +11,9 @@ public class DoubaoModelConfig
     /// 初始化 <see cref="DoubaoModelConfig"/> 的新实例
     /// </summary>
     /// <param name="options">配置选项</param>
-    public DoubaoModelConfig(IOptions<DoubaoModelOptions> options)
+    public DoubaoModelConfig(DoubaoModelOptions options)
     {
-        _options = options.Value;
+        _options = options;
     }
 
     /// <summary>

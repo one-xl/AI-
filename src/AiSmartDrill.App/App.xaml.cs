@@ -52,7 +52,9 @@ public partial class App : System.Windows.Application
         services.AddHttpClient();
 
         // 配置豆包模型选项
-        services.Configure<DoubaoModelOptions>(configuration.GetSection(DoubaoModelOptions.SectionName));
+        var options = new DoubaoModelOptions();
+        configuration.GetSection(DoubaoModelOptions.SectionName).Bind(options);
+        services.AddSingleton(options);
         services.AddSingleton<DoubaoModelConfig>();
         services.AddHttpClient<IChatCompletionService, DoubaoApiClient>();
 
