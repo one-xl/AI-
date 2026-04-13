@@ -28,6 +28,7 @@ public partial class App : System.Windows.Application
         var configuration = new ConfigurationBuilder()
             .SetBasePath(AppContext.BaseDirectory)
             .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+            .AddUserSecrets<App>(optional: true, reloadOnChange: true)
             .Build();
 
         var services = new ServiceCollection();

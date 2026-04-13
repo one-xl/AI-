@@ -1,0 +1,18 @@
+{
+  "ConnectionStrings": {
+    "Default": "Data Source=AiSmartDrill.db"
+  },
+  "Ai": {
+    "Endpoint": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+    "ApiKey": "YOUR_API_KEY_HERE"
+  },
+  "DoubaoModel": {
+    "ApiKey": "YOUR_API_KEY_HERE",
+    "ModelName": "Doubao-Seed-1.8-251228",
+    "BaseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+    "TimeoutSeconds": 30,
+    "MaxRetries": 3,
+    "EnableThinking": true,
+    "EnableVision": true
+  }
+}
