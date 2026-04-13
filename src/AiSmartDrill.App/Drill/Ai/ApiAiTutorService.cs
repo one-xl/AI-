@@ -105,7 +105,12 @@ public sealed class ApiAiTutorService : IAiTutorService
         // 尝试解析AI返回的JSON
         try
         {
-            var analysisResult = JsonSerializer.Deserialize<AnalysisResult>(arkResponse.choices.First().message.content);
+            var content = arkResponse.choices.First().message.content;
+            if (string.IsNullOrEmpty(content))
+            {
+                throw new InvalidOperationException("AI API 返回内容为空");
+            }
+            var analysisResult = JsonSerializer.Deserialize<AnalysisResult>(content);
             return new WrongQuestionInsightDto
             {
                 QuestionId = item.QuestionId,
@@ -120,6 +125,7 @@ public sealed class ApiAiTutorService : IAiTutorService
         catch
         {
             // 如果AI返回的不是JSON格式，直接使用内容
+            var content = arkResponse.choices.First().message.content;
             return new WrongQuestionInsightDto
             {
                 QuestionId = item.QuestionId,
@@ -127,8 +133,8 @@ public sealed class ApiAiTutorService : IAiTutorService
                 StemSummary = item.StemSummary,
                 UserAnswer = item.UserAnswer,
                 StandardAnswer = item.StandardAnswer,
-                RootCause = "错误原因分析：" + arkResponse.choices.First().message.content,
-                SolutionHints = "解题思路：" + arkResponse.choices.First().message.content
+                RootCause = "错误原因分析：" + (content ?? ""),
+                SolutionHints = "解题思路：" + (content ?? "")
             };
         }
     }
