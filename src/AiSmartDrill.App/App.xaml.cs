@@ -2,7 +2,6 @@
 using AiSmartDrill.App.Drill.Ai;
 using AiSmartDrill.App.Drill.Ai.Client;
 using AiSmartDrill.App.Drill.Ai.Config;
-using AiSmartDrill.App.Drill.Ai.Tools;
 using AiSmartDrill.App.Drill.Import;
 using AiSmartDrill.App.Infrastructure;
 using AiSmartDrill.App.ViewModels;
@@ -54,12 +53,6 @@ public partial class App : System.Windows.Application
         services.Configure<DoubaoModelOptions>(configuration.GetSection(DoubaoModelOptions.SectionName));
         services.AddSingleton<DoubaoModelConfig>();
         services.AddHttpClient<IChatCompletionService, DoubaoApiClient>();
-
-        // 注册工具
-        services.AddHttpClient<NetworkTool>();
-        services.AddSingleton<FileTool>();
-        services.AddSingleton<CommandTool>();
-        services.AddSingleton<ToolManager>();
 
         services.AddSingleton<IAiTutorService, ApiAiTutorService>();
         services.AddSingleton<IQuestionRecommendationService, ApiQuestionRecommendationService>();
