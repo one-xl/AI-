@@ -107,17 +107,17 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="TabItem">
                         <Border Name="Border" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}">
-                            <ContentPresenter ContentSource="Header" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <ContentPresenter Name="Content" ContentSource="Header" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{TemplateBinding Foreground}" />
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsSelected" Value="True">
                                 <Setter TargetName="Border" Property="Background" Value="#0B1220" />
-                                <Setter TargetName="Border" Property="Foreground" Value="{StaticResource Brush.Accent}" />
+                                <Setter TargetName="Content" Property="Foreground" Value="{StaticResource Brush.Accent}" />
                                 <Setter TargetName="Border" Property="BorderBrush" Value="{StaticResource Brush.Accent}" />
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Border" Property="Background" Value="#374151" />
-                                <Setter TargetName="Border" Property="Foreground" Value="{StaticResource Brush.Text}" />
+                                <Setter TargetName="Content" Property="Foreground" Value="{StaticResource Brush.Text}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
