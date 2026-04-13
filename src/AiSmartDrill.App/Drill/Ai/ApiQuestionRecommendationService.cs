@@ -174,20 +174,20 @@ public sealed class ApiQuestionRecommendationService : IQuestionRecommendationSe
 
     private class ArkChatResponse
     {
-        public List<Choice> choices { get; set; }
+        public List<Choice>? choices { get; set; }
 
         public class Choice
         {
-            public Message message { get; set; }
+            public Message? message { get; set; }
 
             public class Message
             {
-                public string content { get; set; }
+                public string? content { get; set; }
             }
         }
     }
 
-    private async Task<QuestionRecommendationDto> FallbackToLocalRecommendationAsync(AppDbContext db, long userId, CancellationToken cancellationToken)
+    private async Task<QuestionRecommendationDto> FallbackToLocalRecommendationAsync(AppDbContext? db, long userId, CancellationToken cancellationToken)
     {
         // 如果db为null，创建一个新的数据库上下文
         if (db == null)

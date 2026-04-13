@@ -126,15 +126,15 @@ public sealed class ApiStudyPlanService : IStudyPlanService
 
     private class ArkChatResponse
     {
-        public List<Choice> choices { get; set; }
+        public List<Choice>? choices { get; set; }
 
         public class Choice
         {
-            public Message message { get; set; }
+            public Message? message { get; set; }
 
             public class Message
             {
-                public string content { get; set; }
+                public string? content { get; set; }
             }
         }
     }
