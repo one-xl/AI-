@@ -96,14 +96,14 @@ public sealed class ApiStudyPlanService : IStudyPlanService
         }
 
         // 尝试解析AI返回的JSON
-        var content = arkResponse.choices.First().message.content ?? string.Empty;
+        var aiContent = arkResponse.choices.First().message.content ?? string.Empty;
         try
         {
-            if (string.IsNullOrEmpty(content))
+            if (string.IsNullOrEmpty(aiContent))
             {
                 throw new InvalidOperationException("AI API 返回内容为空");
             }
-            var planResult = JsonSerializer.Deserialize<StudyPlanDto>(content);
+            var planResult = JsonSerializer.Deserialize<StudyPlanDto>(aiContent);
             return planResult ?? FallbackToLocalPlan(summary);
         }
         catch

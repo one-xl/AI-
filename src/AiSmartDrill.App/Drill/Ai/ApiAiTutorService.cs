@@ -103,14 +103,14 @@ public sealed class ApiAiTutorService : IAiTutorService
         }
 
         // 尝试解析AI返回的JSON
-        var content = arkResponse.choices.First().message.content ?? string.Empty;
+        var aiContent = arkResponse.choices.First().message.content ?? string.Empty;
         try
         {
-            if (string.IsNullOrEmpty(content))
+            if (string.IsNullOrEmpty(aiContent))
             {
                 throw new InvalidOperationException("AI API 返回内容为空");
             }
-            var analysisResult = JsonSerializer.Deserialize<AnalysisResult>(content);
+            var analysisResult = JsonSerializer.Deserialize<AnalysisResult>(aiContent);
             return new WrongQuestionInsightDto
             {
                 QuestionId = item.QuestionId,
@@ -132,8 +132,8 @@ public sealed class ApiAiTutorService : IAiTutorService
                 StemSummary = item.StemSummary,
                 UserAnswer = item.UserAnswer,
                 StandardAnswer = item.StandardAnswer,
-                RootCause = "错误原因分析：" + (content ?? ""),
-                SolutionHints = "解题思路：" + (content ?? "")
+                RootCause = "错误原因分析：" + aiContent,
+                SolutionHints = "解题思路：" + aiContent
             };
         }
     }

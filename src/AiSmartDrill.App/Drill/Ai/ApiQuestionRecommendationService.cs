@@ -160,14 +160,14 @@ public sealed class ApiQuestionRecommendationService : IQuestionRecommendationSe
         }
 
         // 尝试解析AI返回的JSON
-        var content = arkResponse.choices.First().message.content ?? string.Empty;
+        var aiContent = arkResponse.choices.First().message.content ?? string.Empty;
         try
         {
-            if (string.IsNullOrEmpty(content))
+            if (string.IsNullOrEmpty(aiContent))
             {
                 throw new InvalidOperationException("AI API 返回内容为空");
             }
-            var recommendation = JsonSerializer.Deserialize<QuestionRecommendationDto>(content);
+            var recommendation = JsonSerializer.Deserialize<QuestionRecommendationDto>(aiContent);
             return recommendation ?? new QuestionRecommendationDto();
         }
         catch
