@@ -376,6 +376,9 @@ healthchecksdb
 # Local SQLite runtime DB (keep AiSmartDrill.db.example if needed)
 AiSmartDrill.db
 
+# Published application folder (dotnet publish -o dist/...)
+/dist/
+
 # Backup folder for Package Reference Convert tool in Visual Studio 2017
 MigrationBackup/
 
