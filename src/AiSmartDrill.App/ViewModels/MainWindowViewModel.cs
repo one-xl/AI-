@@ -613,7 +613,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         try
         {
             _doubaoModelConfig.SetActiveProfile(value.Id);
-            StatusMessage = "已切换 AI 模型：" + value.DisplayLabel;
+            StatusMessage = "已切换模型。";
         }
         catch (Exception ex)
         {
@@ -647,7 +647,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             var listItem = _doubaoModelConfig.AddProfileAtRuntime(profileId, profile);
             AiModelProfileOptions.Add(listItem);
             SelectedAiModelProfile = listItem;
-            StatusMessage = "已添加模型：" + listItem.DisplayLabel;
+            StatusMessage = "已添加模型。";
         }
         catch (Exception ex)
         {
@@ -3388,7 +3388,6 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
                 ExamAiExplanationText = explain.Detail;
             });
             ApplyAiTraceToUi("单题讲解");
-            MessageBox.Show("小瘪三，这都不会", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
             StatusMessage = "已获取当前题的 AI 解析。";
         }
         catch (OperationCanceledException)

@@ -71,10 +71,10 @@
                             VerticalAlignment="Center"
                             Margin="12,0,0,0">
                     <Label Content="AI 模型" VerticalAlignment="Center" Margin="0,0,4,0" />
-                    <ComboBox MinWidth="200"
-                              MaxWidth="280"
+                    <ComboBox Width="280"
                               Margin="0,0,6,0"
                               VerticalAlignment="Center"
+                              ToolTip="{Binding SelectedAiModelProfile.DisplayLabel}"
                               ItemsSource="{Binding AiModelProfileOptions}"
                               SelectedItem="{Binding SelectedAiModelProfile, Mode=TwoWay}">
                         <ComboBox.ItemTemplate>
@@ -121,7 +121,9 @@
                     <TextBlock VerticalAlignment="Center"
                                Opacity="0.9"
                                Text="{Binding StatusMessage}"
-                               TextWrapping="Wrap"
+                               TextWrapping="NoWrap"
+                               TextTrimming="CharacterEllipsis"
+                               ToolTip="{Binding StatusMessage}"
                                MaxWidth="280" />
                 </StackPanel>
                 <StackPanel Grid.Row="1"
