@@ -1,3 +1,4 @@
+using AiSmartDrill.App.Domain;
 using AiSmartDrill.App.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -5,10 +6,12 @@ using Microsoft.Extensions.Logging;
 namespace AiSmartDrill.App.Drill.Ai;
 
 /// <summary>
-/// 本地占位实现的题目推荐服务：基于错题知识点做简单相似度匹配。
+/// 本地占位实现的题目推荐：与云端版一致的排除错题、领域范围与标签/关键词筛选逻辑。
 /// </summary>
 public sealed class LocalQuestionRecommendationService : IQuestionRecommendationService
 {
+    private const int TargetCount = 8;
+
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly ILogger<LocalQuestionRecommendationService> _logger;
 
@@ -26,59 +29,164 @@ public sealed class LocalQuestionRecommendationService : IQuestionRecommendation
     }
 
     /// <inheritdoc />
-    public async Task<QuestionRecommendationDto> RecommendAsync(long userId, CancellationToken cancellationToken = default)
+    public async Task<QuestionRecommendationDto> RecommendAsync(
+        long userId,
+        QuestionRecommendationRequest? request = null,
+        CancellationToken cancellationToken = default)
     {
+        request ??= new QuestionRecommendationRequest();
+
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
-        // 取出错题关联题目的知识点标签，作为推荐的弱项信号。
-        var wrongTags = await db.WrongBookEntries
-            .AsNoTracking()
-            .Where(w => w.UserId == userId)
-            .Join(db.Questions.AsNoTracking(), w => w.QuestionId, q => q.Id, (_, q) => q)
-            .Select(q => q.KnowledgeTags)
+        var wrongQuestionIds = await (
+                from w in db.WrongBookEntries.AsNoTracking()
+                where w.UserId == userId
+                join q in db.Questions.AsNoTracking() on w.QuestionId equals q.Id
+                where request.DomainScope == null || q.Domain == request.DomainScope.Value
+                select w.QuestionId)
+            .Distinct()
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        var tagSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var tags in wrongTags)
+        var wrongSet = wrongQuestionIds.ToHashSet();
+
+        var contextQuestionIds = request.SelectedWrongQuestionIds.Count > 0
+            ? request.SelectedWrongQuestionIds.Where(wrongSet.Contains).Distinct().ToList()
+            : wrongQuestionIds;
+
+        List<Question> contextQuestions;
+        if (contextQuestionIds.Count == 0)
         {
-            foreach (var t in tags.Split(new[] { ',', '，', ';', '；' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            contextQuestions = new List<Question>();
+        }
+        else
+        {
+            contextQuestions = await db.Questions.AsNoTracking()
+                .Where(q => contextQuestionIds.Contains(q.Id))
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        var focusTags = InferFocusTags(contextQuestions);
+        var focusKeywords = InferFocusKeywords(contextQuestions);
+
+        var candidates = await (
+                from q in db.Questions.AsNoTracking()
+                where q.IsEnabled && !wrongSet.Contains(q.Id)
+                where request.DomainScope == null || q.Domain == request.DomainScope.Value
+                orderby q.Id descending
+                select q)
+            .Take(400)
+            .ToListAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        var strict = candidates
+            .Where(q => RecommendationMatcher.MatchesStrict(q, focusTags, focusKeywords))
+            .OrderByDescending(q => ScoreLocal(q, focusTags, focusKeywords))
+            .ThenByDescending(q => q.Id)
+            .ToList();
+
+        var final = strict.Select(q => q.Id).Take(TargetCount).ToList();
+        if (final.Count < TargetCount)
+        {
+            foreach (var q in candidates.Where(q => RecommendationMatcher.MatchesRelaxed(q, focusTags, focusKeywords)))
             {
-                tagSet.Add(t);
+                if (final.Count >= TargetCount)
+                {
+                    break;
+                }
+
+                if (!final.Contains(q.Id))
+                {
+                    final.Add(q.Id);
+                }
             }
         }
 
-        // 从题库中挑选：同标签命中且非已禁用，最多 8 题。
-        var all = await db.Questions.AsNoTracking()
-            .Where(q => q.IsEnabled)
-            .OrderByDescending(q => q.Id)
-            .Take(200)
-            .ToListAsync(cancellationToken)
-            .ConfigureAwait(false);
-
-        var scored = all
-            .Select(q => new
+        if (final.Count < TargetCount)
+        {
+            foreach (var q in candidates)
             {
-                q.Id,
-                Score = tagSet.Count == 0
-                    ? 1
-                    : q.KnowledgeTags.Split(new[] { ',', '，', ';', '；' }, StringSplitOptions.RemoveEmptyEntries)
-                        .Count(t => tagSet.Contains(t.Trim()))
-            })
-            .OrderByDescending(x => x.Score)
-            .ThenByDescending(x => x.Id)
-            .Take(8)
-            .Select(x => x.Id)
-            .ToList();
+                if (final.Count >= TargetCount)
+                {
+                    break;
+                }
 
-        _logger.LogInformation("AI 题目推荐（占位）：UserId={UserId}, Picked={Count}", userId, scored.Count);
+                if (!final.Contains(q.Id))
+                {
+                    final.Add(q.Id);
+                }
+            }
+        }
+
+        _logger.LogInformation("AI 题目推荐（占位）：UserId={UserId}, Picked={Count}", userId, final.Count);
 
         return new QuestionRecommendationDto
         {
-            Rationale = tagSet.Count == 0
-                ? "暂无错题标签信号：推荐最近入库的题目用于巩固。"
-                : "基于错题知识点标签，从题库中挑选最相近的候选题。",
-            RecommendedQuestionIds = scored
+            Rationale = focusTags.Count == 0 && focusKeywords.Count == 0
+                ? "暂无错题标签/关键词信号：在领域与排除错题约束下推荐最近题目。"
+                : "基于错题 TopicTags/TopicKeywords 与知识点，在排除错题本后的候选集中筛选。",
+            FocusTags = focusTags,
+            FocusKeywords = focusKeywords,
+            RecommendedQuestionIds = final.Take(TargetCount).ToList()
         };
+    }
+
+    private static IReadOnlyList<string> InferFocusTags(IReadOnlyList<Question> contextQuestions)
+    {
+        var bag = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var q in contextQuestions)
+        {
+            foreach (var t in RecommendationMatcher.Tokenize(q.TopicTags))
+            {
+                bag[t] = bag.TryGetValue(t, out var c) ? c + 1 : 1;
+            }
+
+            foreach (var t in RecommendationMatcher.Tokenize(q.KnowledgeTags))
+            {
+                bag[t] = bag.TryGetValue(t, out var c) ? c + 1 : 1;
+            }
+        }
+
+        return bag.OrderByDescending(kv => kv.Value).Take(6).Select(kv => kv.Key).ToList();
+    }
+
+    private static IReadOnlyList<string> InferFocusKeywords(IReadOnlyList<Question> contextQuestions)
+    {
+        var bag = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var q in contextQuestions)
+        {
+            foreach (var t in RecommendationMatcher.Tokenize(q.TopicKeywords))
+            {
+                if (t.Length >= 2)
+                {
+                    bag[t] = bag.TryGetValue(t, out var c) ? c + 1 : 1;
+                }
+            }
+        }
+
+        return bag.OrderByDescending(kv => kv.Value).Take(6).Select(kv => kv.Key).ToList();
+    }
+
+    private static int ScoreLocal(Question q, IReadOnlyList<string> focusTags, IReadOnlyList<string> focusKeywords)
+    {
+        var s = 0;
+        foreach (var t in focusTags)
+        {
+            if (RecommendationMatcher.TagFieldsContain(q, t))
+            {
+                s += 3;
+            }
+        }
+
+        foreach (var k in focusKeywords)
+        {
+            if (RecommendationMatcher.KeywordHit(q, k))
+            {
+                s += 2;
+            }
+        }
+
+        return s;
     }
 }

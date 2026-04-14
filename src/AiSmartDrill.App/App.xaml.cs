@@ -31,6 +31,8 @@ public partial class App : System.Windows.Application
             .AddUserSecrets<App>(optional: true, reloadOnChange: true)
             .Build();
 
+        DayNightThemeBootstrap.ApplyStartupTheme(configuration);
+
         var services = new ServiceCollection();
         services.AddSingleton<IConfiguration>(configuration);
 
@@ -54,6 +56,9 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IAiTutorService, ApiAiTutorService>();
         services.AddSingleton<IQuestionRecommendationService, ApiQuestionRecommendationService>();
         services.AddSingleton<IStudyPlanService, ApiStudyPlanService>();
+        services.AddSingleton<ApiQuestionTeachingService>();
+        services.AddSingleton<IQuestionBankAiGenerationService>(sp => sp.GetRequiredService<ApiQuestionTeachingService>());
+        services.AddSingleton<IExamQuestionAiExplainService>(sp => sp.GetRequiredService<ApiQuestionTeachingService>());
         services.AddSingleton<QuestionImportService>();
 
         services.AddSingleton<MainWindowViewModel>();

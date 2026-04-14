@@ -46,6 +46,16 @@ public sealed class Question
     public string KnowledgeTags { get; set; } = string.Empty;
 
     /// <summary>
+    /// 获取或设置领域内的分类标签（逗号/分号分隔），用于 AI 推荐与题库细分检索。
+    /// </summary>
+    public string TopicTags { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 获取或设置检索关键词（逗号/分号分隔），可与题干一起参与推荐匹配。
+    /// </summary>
+    public string TopicKeywords { get; set; } = string.Empty;
+
+    /// <summary>
     /// 获取或设置是否启用（软删除/下架）。
     /// </summary>
     public bool IsEnabled { get; set; } = true;

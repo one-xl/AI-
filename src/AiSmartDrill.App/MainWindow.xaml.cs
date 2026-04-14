@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Windows;
+using System.Windows.Controls;
+using AiSmartDrill.App.Domain;
 using AiSmartDrill.App.ViewModels;
 
 namespace AiSmartDrill.App;
@@ -54,6 +56,37 @@ public partial class MainWindow : Window
             {
                 disposable.Dispose();
             }
+        }
+    }
+
+    /// <summary>
+    /// 表格内「分类标签」列结束编辑时写回数据库，与右侧编辑器保持同步。
+    /// </summary>
+    private async void BankQuestionsDataGrid_OnCellEditEnding(object sender, DataGridCellEditEndingEventArgs e)
+    {
+        if (e.Column is not DataGridTextColumn col || col.Header as string != "分类标签")
+        {
+            return;
+        }
+
+        if (e.EditAction == DataGridEditAction.Cancel)
+        {
+            return;
+        }
+
+        if (e.Row.Item is not Question row || DataContext is not MainWindowViewModel vm)
+        {
+            return;
+        }
+
+        var text = e.EditingElement is TextBox tb ? tb.Text : row.TopicTags;
+        try
+        {
+            await vm.SaveBankQuestionTopicTagsAsync(row.Id, text).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("保存分类标签失败：" + ex.Message, "错误", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 }

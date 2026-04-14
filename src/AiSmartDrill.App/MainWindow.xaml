@@ -9,19 +9,160 @@
         Height="760"
         Width="1180"
         Closed="MainWindow_OnClosed">
+    <Window.Resources>
+        <Style x:Key="ExamTrueButtonStyle" TargetType="Button" BasedOn="{StaticResource ChromeButtonStyle}">
+            <Setter Property="MinWidth" Value="120" />
+            <Setter Property="MinHeight" Value="44" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Background" Value="{DynamicResource Brush.InputBackground}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding DataContext.ExamUserAnswer, RelativeSource={RelativeSource AncestorType=Window}}" Value="对">
+                    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Accent}" />
+                    <Setter Property="BorderThickness" Value="2" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="ExamFalseButtonStyle" TargetType="Button" BasedOn="{StaticResource ChromeButtonStyle}">
+            <Setter Property="MinWidth" Value="120" />
+            <Setter Property="MinHeight" Value="44" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Background" Value="{DynamicResource Brush.InputBackground}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding DataContext.ExamUserAnswer, RelativeSource={RelativeSource AncestorType=Window}}" Value="错">
+                    <Setter Property="BorderBrush" Value="{DynamicResource Brush.Accent}" />
+                    <Setter Property="BorderThickness" Value="2" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
     <DockPanel Margin="16">
-        <Border DockPanel.Dock="Top" Padding="14" CornerRadius="10" Background="{StaticResource Brush.Surface}" BorderBrush="#334155" BorderThickness="1" Margin="0,0,0,12">
-            <DockPanel LastChildFill="False">
-                <StackPanel DockPanel.Dock="Left" Orientation="Vertical">
-                    <TextBlock FontSize="22" FontWeight="SemiBold" Text="AI 智能题库与刷题系统" />
-                    <TextBlock Margin="0,6,0,0" Opacity="0.85" Text="WPF · EF Core SQLite · 火山方舟豆包（Chat Completions）" />
+        <Border DockPanel.Dock="Top"
+                Padding="12"
+                CornerRadius="6"
+                Background="{DynamicResource Brush.HeaderBarBackground}"
+                BorderBrush="{DynamicResource Brush.Border}"
+                BorderThickness="1"
+                Margin="0,0,0,12">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" MinWidth="160" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0"
+                           FontSize="20"
+                           FontWeight="SemiBold"
+                           VerticalAlignment="Center"
+                           Text="AI 智能题库与刷题系统" />
+                <StackPanel Grid.Column="1"
+                            Margin="16,0"
+                            VerticalAlignment="Center"
+                            HorizontalAlignment="Stretch">
+                    <TextBlock FontSize="11"
+                               Opacity="0.85"
+                               Text="{Binding SunLocationHint}"
+                               TextWrapping="Wrap" />
+                    <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                        <TextBlock VerticalAlignment="Center"
+                                   FontWeight="SemiBold"
+                                   Text="{Binding SunSummaryLine}"
+                                   TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Margin="0,6,0,0"
+                                HorizontalAlignment="Left"
+                                Visibility="{Binding ShowSunTimeline, Converter={StaticResource BoolToVisibility}}">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <Grid Width="400" Height="14" HorizontalAlignment="Left" VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Rectangle Fill="{DynamicResource Brush.Text}"
+                                               Opacity="0.28"
+                                               Width="{Binding SunBarNight1Width}"
+                                               Height="12"
+                                               RadiusX="1"
+                                               RadiusY="1" />
+                                    <Rectangle Fill="{DynamicResource Brush.Accent}"
+                                               Opacity="0.55"
+                                               Width="{Binding SunBarDayWidth}"
+                                               Height="12"
+                                               RadiusX="1"
+                                               RadiusY="1" />
+                                    <Rectangle Fill="{DynamicResource Brush.Text}"
+                                               Opacity="0.28"
+                                               Width="{Binding SunBarNight2Width}"
+                                               Height="12"
+                                               RadiusX="1"
+                                               RadiusY="1" />
+                                </StackPanel>
+                                <Canvas Width="400" Height="14" IsHitTestVisible="False">
+                                    <Rectangle Canvas.Left="{Binding SunIndicatorOffset}"
+                                               Width="2"
+                                               Height="14"
+                                               Fill="#FFFF7040" />
+                                </Canvas>
+                            </Grid>
+                            <TextBlock Margin="10,0,0,0"
+                                       VerticalAlignment="Center"
+                                       FontSize="12"
+                                       FontWeight="SemiBold"
+                                       FontFamily="Consolas,Courier New"
+                                       Foreground="{DynamicResource Brush.Text}"
+                                       Text="{Binding HeaderClockText}" />
+                        </StackPanel>
+                        <TextBlock Width="400"
+                                   HorizontalAlignment="Left"
+                                   Margin="0,4,0,0"
+                                   FontSize="10"
+                                   Opacity="0.75"
+                                   TextAlignment="Left"
+                                   TextWrapping="Wrap"
+                                   Text="色条：午夜→日出（浅）→白昼（主题色）→日落→午夜；竖线为当前本机时刻。" />
+                    </StackPanel>
+                    <TextBlock Margin="0,6,0,0"
+                               FontSize="11"
+                               Foreground="{DynamicResource Brush.Accent}"
+                               TextWrapping="Wrap"
+                               Visibility="{Binding ShowSunScheduleMessage, Converter={StaticResource BoolToVisibility}}"
+                               Text="{Binding SunPhaseHint}" />
                 </StackPanel>
-                <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" Opacity="0.85" Text="{Binding StatusMessage}" TextWrapping="Wrap" MaxWidth="520" />
-            </DockPanel>
-        </Border>
-
-        <Border DockPanel.Dock="Bottom" Padding="10" CornerRadius="8" Background="#0B1220" BorderBrush="#334155" BorderThickness="1" Margin="0,12,0,0">
-            <TextBlock Opacity="0.75" Text="单选/多选点选项按钮；判断点「对」「错」；简答按关键词；填空题标准答案填正则表达式判分。" TextWrapping="Wrap" />
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <CheckBox Margin="0,0,12,0"
+                              VerticalAlignment="Center"
+                              Content="按日出/日落自动主题"
+                              IsChecked="{Binding UseSunAutoTheme, Mode=TwoWay}"
+                              IsEnabled="{Binding SunScheduleFeatureEnabled}" />
+                    <Button Command="{Binding ToggleThemeCommand}"
+                            ToolTip="{Binding ThemeToggleToolTip}"
+                            Padding="8,6"
+                            Margin="0,0,12,0"
+                            VerticalAlignment="Center">
+                        <Grid Width="22" Height="22">
+                            <TextBlock FontFamily="Segoe MDL2 Assets"
+                                       Text="&#xE706;"
+                                       FontSize="16"
+                                       Foreground="{DynamicResource Brush.Text}"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       Visibility="{Binding ShowSunGlyph, Converter={StaticResource BoolToVisibility}}" />
+                            <TextBlock FontFamily="Segoe MDL2 Assets"
+                                       Text="&#xE708;"
+                                       FontSize="16"
+                                       Foreground="{DynamicResource Brush.Text}"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       Visibility="{Binding ShowMoonGlyph, Converter={StaticResource BoolToVisibility}}" />
+                        </Grid>
+                    </Button>
+                    <TextBlock VerticalAlignment="Center"
+                               Opacity="0.9"
+                               Text="{Binding StatusMessage}"
+                               TextWrapping="Wrap"
+                               MaxWidth="320" />
+                </StackPanel>
+            </Grid>
         </Border>
 
         <TabControl x:Name="MainTabControl">
@@ -40,31 +181,144 @@
                         <Button Content="删除题目" Command="{Binding DeleteQuestionCommand}" />
                     </StackPanel>
 
+                    <StackPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                        <WrapPanel Orientation="Horizontal">
+                            <Label Content="AI 模板" VerticalAlignment="Center" />
+                            <ComboBox Width="150"
+                                      Margin="6,0,12,0"
+                                      VerticalAlignment="Center"
+                                      ItemsSource="{Binding BankAiTemplateOptions}"
+                                      SelectedItem="{Binding SelectedBankAiTemplate}" />
+                            <Label Content="生成数量" VerticalAlignment="Center" />
+                            <TextBox Width="52"
+                                     Margin="6,0,12,0"
+                                     VerticalAlignment="Center"
+                                     Text="{Binding BankAiGenCount, UpdateSourceTrigger=PropertyChanged}" />
+                            <Button Content="AI 按模板生成并入库"
+                                    MinWidth="168"
+                                    Padding="12,8"
+                                    VerticalAlignment="Center"
+                                    Command="{Binding GenerateBankQuestionsFromAiCommand}"
+                                    IsEnabled="{Binding CanUseBankAiGen}" />
+                            <TextBlock Margin="12,0,0,0"
+                                       VerticalAlignment="Center"
+                                       Opacity="0.85"
+                                       TextWrapping="Wrap"
+                                       MaxWidth="420"
+                                       Text="领域取自上方「题目编辑器」中的领域；模板决定题型。模型须返回 JSON 数组（与导入格式一致）。" />
+                        </WrapPanel>
+                        <Border Margin="0,8,0,0"
+                                Padding="8,6"
+                                CornerRadius="4"
+                                Background="{DynamicResource Brush.Surface}"
+                                BorderBrush="{DynamicResource Brush.Border}"
+                                BorderThickness="1"
+                                Visibility="{Binding IsBankAiGenerating, Converter={StaticResource BoolToVisibility}}">
+                            <StackPanel>
+                                <TextBlock FontWeight="SemiBold"
+                                           Foreground="{DynamicResource Brush.Accent}"
+                                           Text="{Binding BankAiProgressPhase}" />
+                                <ProgressBar Height="6"
+                                             Margin="0,6,0,0"
+                                             IsIndeterminate="True"
+                                             Foreground="{DynamicResource Brush.Accent}" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="2*" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
 
-                        <DataGrid Grid.Column="0"
+                        <DataGrid x:Name="BankQuestionsDataGrid"
+                                  Grid.Column="0"
                                   Margin="0,0,12,0"
                                   ItemsSource="{Binding BankQuestions}"
                                   SelectedItem="{Binding SelectedBankQuestion}"
                                   AutoGenerateColumns="False"
-                                  IsReadOnly="True"
+                                  IsReadOnly="False"
                                   CanUserAddRows="False"
-                                  CanUserDeleteRows="False">
+                                  CanUserDeleteRows="False"
+                                  CellEditEnding="BankQuestionsDataGrid_OnCellEditEnding">
                             <DataGrid.Columns>
-                                <DataGridTextColumn Header="Id" Binding="{Binding Id}" Width="60" />
-                                <DataGridTextColumn Header="题型" Binding="{Binding Type}" Width="90" />
-                                <DataGridTextColumn Header="难度" Binding="{Binding Difficulty}" Width="90" />
-                                <DataGridTextColumn Header="标准答案" Binding="{Binding StandardAnswer}" Width="160" />
-                                <DataGridTextColumn Header="题干" Binding="{Binding Stem}" Width="*" />
+                                <DataGridTextColumn Header="Id"
+                                                    Binding="{Binding Id}"
+                                                    Width="60"
+                                                    IsReadOnly="True" />
+                                <DataGridTextColumn Header="题型"
+                                                    Binding="{Binding Type}"
+                                                    Width="90"
+                                                    IsReadOnly="True" />
+                                <DataGridTextColumn Header="难度"
+                                                    Binding="{Binding Difficulty}"
+                                                    Width="90"
+                                                    IsReadOnly="True" />
+                                <DataGridTextColumn Header="分类标签"
+                                                    Binding="{Binding TopicTags, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                                                    Width="200"
+                                                    IsReadOnly="False" />
+                                <DataGridTextColumn Header="标准答案"
+                                                    Binding="{Binding StandardAnswer}"
+                                                    Width="160"
+                                                    IsReadOnly="True" />
+                                <DataGridTextColumn Header="题干"
+                                                    Binding="{Binding Stem}"
+                                                    Width="*"
+                                                    IsReadOnly="True" />
                             </DataGrid.Columns>
                         </DataGrid>
 
-                        <StackPanel Grid.Column="1">
-                            <TextBlock FontWeight="SemiBold" Text="题目编辑器" Margin="0,0,0,8" />
+                        <Grid Grid.Column="1">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <Grid Grid.Row="0" Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0"
+                                           FontWeight="SemiBold"
+                                           Text="题目编辑器"
+                                           VerticalAlignment="Center" />
+                                <StackPanel Grid.Column="1"
+                                            Orientation="Horizontal"
+                                            VerticalAlignment="Center">
+                                    <CheckBox Margin="0,0,8,0"
+                                              VerticalAlignment="Center"
+                                              Content="提示词带标签"
+                                              IsChecked="{Binding EditorAiSendTopicTagsToPrompt, Mode=TwoWay}"
+                                              ToolTip="勾选时把下方「分类标签」「检索关键词」一并写入 AI 提示；不勾选则仅按领域、题型与难度出题，填入的标签以模型返回为准。" />
+                                    <Button MinWidth="100"
+                                            Padding="12,6"
+                                            Content="AI 出题"
+                                            ToolTip="仅在「新建题目」（左侧未选中题目）时可用。上方为进度与动画；成功后仅弹出简短提示，详情见 AI 日志。"
+                                            Command="{Binding FillEditorQuestionFromAiCommand}" />
+                                </StackPanel>
+                            </Grid>
+                            <Border Grid.Row="1"
+                                    Margin="0,0,0,8"
+                                    Padding="8,6"
+                                    CornerRadius="4"
+                                    Background="{DynamicResource Brush.Surface}"
+                                    BorderBrush="{DynamicResource Brush.Border}"
+                                    BorderThickness="1"
+                                    Visibility="{Binding IsEditorAiFillBusy, Converter={StaticResource BoolToVisibility}}">
+                                <StackPanel>
+                                    <TextBlock FontWeight="SemiBold"
+                                               Foreground="{DynamicResource Brush.Accent}"
+                                               Text="{Binding EditorAiProgressPhase}" />
+                                    <ProgressBar Height="6"
+                                                 Margin="0,6,0,0"
+                                                 IsIndeterminate="True"
+                                                 Foreground="{DynamicResource Brush.Accent}" />
+                                </StackPanel>
+                            </Border>
+                            <StackPanel Grid.Row="2">
                             <Label Content="题型" />
                             <ComboBox ItemsSource="{Binding EditorTypeOptions}" SelectedItem="{Binding EditorType}" />
                             <Label Content="难度" />
@@ -79,14 +333,55 @@
                             <TextBox Height="70" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" Text="{Binding EditorOptionsJson, UpdateSourceTrigger=PropertyChanged}" />
                             <Label Content="知识点标签" />
                             <TextBox Text="{Binding EditorKnowledgeTags, UpdateSourceTrigger=PropertyChanged}" />
-                        </StackPanel>
+                            <Label Content="分类标签（逗号分隔，用于推荐）" />
+                            <TextBlock Margin="0,0,0,4"
+                                       FontSize="11"
+                                       Opacity="0.8"
+                                       TextWrapping="Wrap"
+                                       Text="点击下方词可追加到本框；也可在左侧表格「分类标签」列直接修改，失焦后自动入库。" />
+                            <ScrollViewer MaxHeight="120"
+                                          VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled">
+                                <ItemsControl ItemsSource="{Binding TopicTagPresetOptions}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Button Margin="0,0,6,6"
+                                                    Padding="8,4"
+                                                    Content="{Binding}"
+                                                    Command="{Binding DataContext.AppendTopicTagCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding}" />
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
+                            <TextBox Margin="0,4,0,0"
+                                     Text="{Binding EditorTopicTags, UpdateSourceTrigger=PropertyChanged}"
+                                     TextWrapping="Wrap"
+                                     AcceptsReturn="True"
+                                     MinHeight="36"
+                                     VerticalScrollBarVisibility="Auto" />
+                            <Label Content="检索关键词（逗号/分号分隔）" />
+                            <TextBox Text="{Binding EditorTopicKeywords, UpdateSourceTrigger=PropertyChanged}" />
+                            </StackPanel>
+                        </Grid>
                     </Grid>
                 </DockPanel>
             </TabItem>
 
             <TabItem Header="考试 / 刷题">
                 <DockPanel Margin="0,10,0,0">
-                    <Border DockPanel.Dock="Top" Padding="12" CornerRadius="10" Background="{StaticResource Brush.Surface}" BorderBrush="#334155" BorderThickness="1" Margin="0,0,0,12">
+                    <Border DockPanel.Dock="Top"
+                            Padding="12"
+                            CornerRadius="6"
+                            Background="{DynamicResource Brush.Surface}"
+                            BorderBrush="{DynamicResource Brush.Border}"
+                            BorderThickness="1"
+                            Margin="0,0,0,12">
                         <StackPanel>
                             <WrapPanel ItemHeight="40">
                                 <Label Content="题量" VerticalAlignment="Center" />
@@ -98,11 +393,7 @@
                                 <Button Content="取消做题" Command="{Binding CancelExamCommand}" Width="80" Height="35" />
                                 <TextBlock Margin="12,0,0,0" VerticalAlignment="Center" Text="{Binding LastScoreText, StringFormat=最近成绩：{0}}" />
                             </WrapPanel>
-                            <TextBlock Margin="0,10,0,4"
-                                       Opacity="0.88"
-                                       TextWrapping="Wrap"
-                                       Text="刷题领域：勾选一项或多项则仅从所选领域抽题；全部不勾选时，领域范围与「题库管理」页的领域下拉一致（选「全部」即不限领域）。" />
-                            <ItemsControl ItemsSource="{Binding ExamDomainPicks}">
+                            <ItemsControl Margin="0,10,0,0" ItemsSource="{Binding ExamDomainPicks}">
                                 <ItemsControl.ItemsPanel>
                                     <ItemsPanelTemplate>
                                         <WrapPanel />
@@ -120,17 +411,24 @@
                         </StackPanel>
                     </Border>
 
-                    <Border DockPanel.Dock="Top" Padding="12" CornerRadius="10" Background="#0B1220" BorderBrush="{StaticResource Brush.Accent}" BorderThickness="1" Margin="0,0,0,12">
+                    <Border DockPanel.Dock="Top"
+                            Padding="12"
+                            CornerRadius="6"
+                            Background="{DynamicResource Brush.CountdownStripBackground}"
+                            BorderBrush="{DynamicResource Brush.Accent}"
+                            BorderThickness="1"
+                            Margin="0,0,0,12">
                         <DockPanel>
-                            <TextBlock DockPanel.Dock="Left" FontWeight="SemiBold" Foreground="{StaticResource Brush.Accent}" Text="倒计时（秒）" />
-                            <TextBlock DockPanel.Dock="Left" Margin="10,0,0,0" FontSize="22" FontWeight="Bold" Foreground="{StaticResource Brush.Accent}" Text="{Binding ExamRemainingSeconds}" />
+                            <TextBlock DockPanel.Dock="Left" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Accent}" Text="倒计时（秒）" />
+                            <TextBlock DockPanel.Dock="Left" Margin="10,0,0,0" FontSize="22" FontWeight="Bold" Foreground="{DynamicResource Brush.Accent}" Text="{Binding ExamRemainingSeconds}" />
                             <TextBlock DockPanel.Dock="Right" Opacity="0.85" Text="{Binding ExamProgressLabel}" TextWrapping="Wrap" MaxWidth="420" TextAlignment="Right" />
                         </DockPanel>
                     </Border>
 
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <Grid MinHeight="200">
+                        <Grid MinHeight="200">
                         <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
@@ -145,9 +443,9 @@
                         <Border Grid.Row="1"
                                 MaxHeight="280"
                                 Padding="12"
-                                CornerRadius="10"
-                                Background="{StaticResource Brush.Surface}"
-                                BorderBrush="#334155"
+                                CornerRadius="6"
+                                Background="{DynamicResource Brush.Surface}"
+                                BorderBrush="{DynamicResource Brush.Border}"
                                 BorderThickness="1"
                                 Margin="0,0,0,10">
                             <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -176,22 +474,9 @@
                                                     Margin="0,0,10,8"
                                                     Padding="12,8"
                                                     Content="{Binding Caption}"
+                                                    Style="{StaticResource ExamOptionButtonStyle}"
                                                     Command="{Binding DataContext.ExamPickSingleOptionCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                    CommandParameter="{Binding Key}">
-                                                <Button.Style>
-                                                    <Style TargetType="Button">
-                                                        <Setter Property="Background" Value="#0F172A" />
-                                                        <Setter Property="Foreground" Value="{StaticResource Brush.Text}" />
-                                                        <Setter Property="BorderBrush" Value="#334155" />
-                                                        <Style.Triggers>
-                                                            <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                                                                <Setter Property="BorderBrush" Value="{StaticResource Brush.Accent}" />
-                                                                <Setter Property="BorderThickness" Value="2" />
-                                                            </DataTrigger>
-                                                        </Style.Triggers>
-                                                    </Style>
-                                                </Button.Style>
-                                            </Button>
+                                                    CommandParameter="{Binding Key}" />
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
@@ -209,71 +494,71 @@
                                                     Margin="0,0,10,8"
                                                     Padding="12,8"
                                                     Content="{Binding Caption}"
+                                                    Style="{StaticResource ExamOptionButtonStyle}"
                                                     Command="{Binding DataContext.ExamToggleMultiOptionCommand, RelativeSource={RelativeSource AncestorType=Window}}"
-                                                    CommandParameter="{Binding Key}">
-                                                <Button.Style>
-                                                    <Style TargetType="Button">
-                                                        <Setter Property="Background" Value="#0F172A" />
-                                                        <Setter Property="Foreground" Value="{StaticResource Brush.Text}" />
-                                                        <Setter Property="BorderBrush" Value="#334155" />
-                                                        <Style.Triggers>
-                                                            <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                                                                <Setter Property="BorderBrush" Value="{StaticResource Brush.Accent}" />
-                                                                <Setter Property="BorderThickness" Value="2" />
-                                                            </DataTrigger>
-                                                        </Style.Triggers>
-                                                    </Style>
-                                                </Button.Style>
-                                            </Button>
+                                                    CommandParameter="{Binding Key}" />
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
-                                <StackPanel Margin="0,0,0,8"
-                                            Orientation="Horizontal"
-                                            Visibility="{Binding ExamShowTrueFalsePanel, Converter={StaticResource BoolToVisibility}}">
-                                    <Button MinWidth="100"
-                                            Margin="0,0,10,0"
+                                <UniformGrid Margin="0,0,0,8"
+                                             Rows="1"
+                                             Columns="2"
+                                             Width="252"
+                                             HorizontalAlignment="Left"
+                                             Visibility="{Binding ExamShowTrueFalsePanel, Converter={StaticResource BoolToVisibility}}">
+                                    <Button Margin="0,0,6,0"
                                             Padding="14,10"
                                             Content="对"
-                                            Command="{Binding ExamPickTrueCommand}">
-                                        <Button.Style>
-                                            <Style TargetType="Button">
-                                                <Setter Property="Background" Value="#0F172A" />
-                                                <Setter Property="Foreground" Value="{StaticResource Brush.Text}" />
-                                                <Setter Property="BorderBrush" Value="#334155" />
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding ExamUserAnswer}" Value="对">
-                                                        <Setter Property="BorderBrush" Value="{StaticResource Brush.Accent}" />
-                                                        <Setter Property="BorderThickness" Value="2" />
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </Button.Style>
-                                    </Button>
-                                    <Button MinWidth="100"
+                                            Style="{StaticResource ExamTrueButtonStyle}"
+                                            Command="{Binding ExamPickTrueCommand}" />
+                                    <Button Margin="6,0,0,0"
                                             Padding="14,10"
                                             Content="错"
-                                            Command="{Binding ExamPickFalseCommand}">
-                                        <Button.Style>
-                                            <Style TargetType="Button">
-                                                <Setter Property="Background" Value="#0F172A" />
-                                                <Setter Property="Foreground" Value="{StaticResource Brush.Text}" />
-                                                <Setter Property="BorderBrush" Value="#334155" />
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding ExamUserAnswer}" Value="错">
-                                                        <Setter Property="BorderBrush" Value="{StaticResource Brush.Accent}" />
-                                                        <Setter Property="BorderThickness" Value="2" />
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </Button.Style>
-                                    </Button>
-                                </StackPanel>
+                                            Style="{StaticResource ExamFalseButtonStyle}"
+                                            Command="{Binding ExamPickFalseCommand}" />
+                                </UniformGrid>
                                 <TextBox MinHeight="34"
                                          Visibility="{Binding ExamShowTextAnswerPanel, Converter={StaticResource BoolToVisibility}}"
                                          Text="{Binding ExamUserAnswer, UpdateSourceTrigger=PropertyChanged}" />
                             </StackPanel>
                         </DockPanel>
+
+                        <StackPanel Grid.Row="3" Margin="0,12,0,0">
+                            <WrapPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                <Button Content="不会，问AI"
+                                        MinWidth="132"
+                                        Padding="12,8"
+                                        Command="{Binding AskAiAboutCurrentExamQuestionCommand}"
+                                        IsEnabled="{Binding CanAskExamAi}" />
+                                <TextBlock Margin="12,0,0,0"
+                                           VerticalAlignment="Center"
+                                           Opacity="0.85"
+                                           Text="将本题与当前作答发送给模型，返回解析" />
+                            </WrapPanel>
+                            <GroupBox Header="AI 解析">
+                                <Grid MinHeight="90" MaxHeight="220">
+                                    <TextBox TextWrapping="Wrap"
+                                             AcceptsReturn="True"
+                                             VerticalScrollBarVisibility="Auto"
+                                             Text="{Binding ExamAiExplanationText, Mode=OneWay}"
+                                             IsReadOnly="True" />
+                                    <Border Background="{DynamicResource Brush.OverlayScrim}"
+                                            Visibility="{Binding IsExamAiExplainBusy, Converter={StaticResource BoolToVisibility}}">
+                                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Margin="20">
+                                            <TextBlock Text="正在请求 AI…"
+                                                       FontWeight="SemiBold"
+                                                       HorizontalAlignment="Center"
+                                                       Foreground="{DynamicResource Brush.Accent}" />
+                                            <ProgressBar IsIndeterminate="True"
+                                                         Height="8"
+                                                         Width="200"
+                                                         Margin="0,14,0,0"
+                                                         BorderThickness="0" />
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </GroupBox>
+                        </StackPanel>
                     </Grid>
                     </ScrollViewer>
                 </DockPanel>
@@ -283,7 +568,6 @@
                 <DockPanel Margin="0,10,0,0">
                     <Grid DockPanel.Dock="Top" Margin="0,0,0,10">
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
@@ -340,28 +624,18 @@
                                     Padding="12,8"
                                     VerticalAlignment="Center" />
                             <CheckBox VerticalAlignment="Center"
-                                      MaxWidth="520"
-                                      Content="长期保存错题详情（错答快照写入本地 SQLite）"
+                                      Content="保存错题详情"
                                       IsChecked="{Binding PersistWrongBookDetails}" />
                         </WrapPanel>
-                        <!-- 固定可视高度，超出换行并由纵向滚动条查看 -->
-                        <Border Grid.Row="2"
-                                Margin="0,8,0,0"
-                                MaxHeight="72"
-                                Padding="8,6"
-                                CornerRadius="6"
-                                Background="#0F172A"
-                                BorderBrush="#334155"
-                                BorderThickness="1">
-                            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                                <TextBlock Opacity="0.88"
-                                           TextWrapping="Wrap"
-                                           Text="勾选「解析」列将题目加入短时记忆；领域旁按钮可在当前列表「全选」与「全部不选」之间切换。AI 解析仅发送勾选题。「删除」移除错题本条目。完成「错题再练」并交卷后显示「已重做」。关闭长期保存时仍累计错次，但不写入错答文本。" />
-                            </ScrollViewer>
-                        </Border>
                     </Grid>
 
-                    <Border DockPanel.Dock="Top" Padding="10" CornerRadius="8" Background="#0F172A" BorderBrush="#334155" BorderThickness="1" Margin="0,0,0,10">
+                    <Border DockPanel.Dock="Top"
+                            Padding="10"
+                            CornerRadius="6"
+                            Background="{DynamicResource Brush.SurfaceElevated}"
+                            BorderBrush="{DynamicResource Brush.Border}"
+                            BorderThickness="1"
+                            Margin="0,0,0,10">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="220" />
@@ -369,10 +643,10 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0" Margin="0,0,12,0">
                                 <TextBlock FontWeight="SemiBold" Text="AI 请求状态" />
-                                <TextBlock Margin="0,6,0,0" Foreground="{StaticResource Brush.Accent}" FontWeight="SemiBold" Text="{Binding AiPipelinePhase}" />
+                                <TextBlock Margin="0,6,0,0" Foreground="{DynamicResource Brush.Accent}" FontWeight="SemiBold" Text="{Binding AiPipelinePhase}" />
                                 <TextBlock Margin="0,4,0,0" Text="{Binding AiPipelineDetail}" TextWrapping="Wrap" Opacity="0.9" />
                             </StackPanel>
-                            <GroupBox Grid.Column="1" Header="调用日志（调试）" Foreground="{StaticResource Brush.Text}">
+                            <GroupBox Grid.Column="1" Header="调用日志（调试）">
                                 <TextBox Text="{Binding AiPipelineLog, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" MaxHeight="140" FontFamily="Consolas" FontSize="11" />
                             </GroupBox>
                         </Grid>
@@ -384,7 +658,7 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
 
-                        <GroupBox Grid.Column="0" Header="错题列表（含错答 / 标答）" Margin="0,0,12,0" Foreground="{StaticResource Brush.Text}">
+                        <GroupBox Grid.Column="0" Header="错题列表（含错答 / 标答）" Margin="0,0,12,0">
                             <DataGrid ItemsSource="{Binding WrongBookRows}"
                                       AutoGenerateColumns="False"
                                       CanUserAddRows="False"
@@ -559,7 +833,7 @@
                                                 <TextBlock HorizontalAlignment="Center"
                                                            VerticalAlignment="Center"
                                                            FontWeight="SemiBold"
-                                                           Foreground="{StaticResource Brush.Accent}"
+                                                           Foreground="{DynamicResource Brush.Accent}"
                                                            Text="{Binding RedoTagDisplay}"
                                                            ToolTip="{Binding RedoTagToolTip}" />
                                             </DataTemplate>
@@ -586,7 +860,7 @@
                             </DataGrid>
                         </GroupBox>
 
-                        <GroupBox Grid.Column="1" Header="AI 输出（解析/推荐）" Foreground="{StaticResource Brush.Text}">
+                        <GroupBox Grid.Column="1" Header="AI 输出（解析/推荐）">
                             <Grid MinHeight="280">
                                 <TextBox VerticalAlignment="Stretch"
                                          TextWrapping="Wrap"
@@ -594,7 +868,7 @@
                                          VerticalScrollBarVisibility="Auto"
                                          Text="{Binding AiOutputText, Mode=OneWay}"
                                          IsReadOnly="True" />
-                                <Border Background="#E60B1220"
+                                <Border Background="{DynamicResource Brush.OverlayScrim}"
                                         Visibility="{Binding AiMainOutputBusy, Converter={StaticResource BoolToVisibility}}">
                                     <StackPanel VerticalAlignment="Center"
                                                 HorizontalAlignment="Center"
@@ -605,12 +879,10 @@
                                                    TextAlignment="Center"
                                                    FontSize="15"
                                                    FontWeight="SemiBold"
-                                                   Foreground="{StaticResource Brush.Accent}" />
+                                                   Foreground="{DynamicResource Brush.Accent}" />
                                         <ProgressBar IsIndeterminate="True"
                                                      Height="8"
                                                      Margin="0,18,0,0"
-                                                     Foreground="{StaticResource Brush.Accent}"
-                                                     Background="#1E293B"
                                                      BorderThickness="0" />
                                     </StackPanel>
                                 </Border>
@@ -632,7 +904,7 @@
                                  VerticalScrollBarVisibility="Auto"
                                  Text="{Binding StudyPlanText, Mode=OneWay}"
                                  IsReadOnly="True" />
-                        <Border Background="#E60B1220"
+                        <Border Background="{DynamicResource Brush.OverlayScrim}"
                                 Visibility="{Binding StudyPlanOutputBusy, Converter={StaticResource BoolToVisibility}}">
                             <StackPanel VerticalAlignment="Center"
                                         HorizontalAlignment="Center"
@@ -643,12 +915,10 @@
                                            TextAlignment="Center"
                                            FontSize="15"
                                            FontWeight="SemiBold"
-                                           Foreground="{StaticResource Brush.Accent}" />
+                                           Foreground="{DynamicResource Brush.Accent}" />
                                 <ProgressBar IsIndeterminate="True"
                                              Height="8"
                                              Margin="0,18,0,0"
-                                             Foreground="{StaticResource Brush.Accent}"
-                                             Background="#1E293B"
                                              BorderThickness="0" />
                             </StackPanel>
                         </Border>

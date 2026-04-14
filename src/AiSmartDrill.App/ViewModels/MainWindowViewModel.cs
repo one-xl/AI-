@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Threading;
+using AiSmartDrill.App;
 using Microsoft.Win32;
 using AiSmartDrill.App.Drill.Ai;
 using AiSmartDrill.App.Drill.Grading;
@@ -15,6 +16,7 @@ using AiSmartDrill.App.Infrastructure;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace AiSmartDrill.App.ViewModels;
@@ -34,13 +36,26 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly IQuestionRecommendationService _recommendation;
     private readonly IStudyPlanService _studyPlan;
     private readonly QuestionImportService _importService;
+    private readonly IQuestionBankAiGenerationService _questionBankAi;
+    private readonly IExamQuestionAiExplainService _examQuestionAi;
     private readonly AiCallTrace _aiTrace;
     private readonly ILogger<MainWindowViewModel> _logger;
+    private readonly IConfiguration _configuration;
 
     /// <summary>
     /// 考试计时器：每秒递减剩余秒数；到达 0 时自动交卷。
     /// </summary>
     private readonly DispatcherTimer _examTimer;
+
+    /// <summary>
+    /// 每分钟刷新日出日落时间线，并在开启自动策略时校正主题。
+    /// </summary>
+    private readonly DispatcherTimer _sunScheduleTimer;
+
+    /// <summary>
+    /// 每秒更新顶栏「当前时间」显示（与色条同区展示）。
+    /// </summary>
+    private readonly DispatcherTimer _headerClockTimer;
 
     /// <summary>
     /// 当前考试会话 Id（一次组卷对应一个 Guid）。
@@ -84,6 +99,11 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     /// <param name="aiTutor">AI 错题解析服务。</param>
     /// <param name="recommendation">AI 推荐服务。</param>
     /// <param name="studyPlan">AI 学习计划服务。</param>
+    /// <param name="importService">题库导入服务。</param>
+    /// <param name="questionBankAi">题库 AI 按模板生成服务。</param>
+    /// <param name="examQuestionAi">考试中单题 AI 讲解服务。</param>
+    /// <param name="aiTrace">AI 调用轨迹。</param>
+    /// <param name="configuration">应用配置（日出日落经纬度等）。</param>
     /// <param name="logger">日志记录器。</param>
     public MainWindowViewModel(
         IDbContextFactory<AppDbContext> dbFactory,
@@ -91,7 +111,10 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         IQuestionRecommendationService recommendation,
         IStudyPlanService studyPlan,
         QuestionImportService importService,
+        IQuestionBankAiGenerationService questionBankAi,
+        IExamQuestionAiExplainService examQuestionAi,
         AiCallTrace aiTrace,
+        IConfiguration configuration,
         ILogger<MainWindowViewModel> logger)
     {
         _dbFactory = dbFactory;
@@ -99,11 +122,22 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         _recommendation = recommendation;
         _studyPlan = studyPlan;
         _importService = importService;
+        _questionBankAi = questionBankAi;
+        _examQuestionAi = examQuestionAi;
         _aiTrace = aiTrace;
+        _configuration = configuration;
         _logger = logger;
 
         _examTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _examTimer.Tick += OnExamTimerTick;
+
+        _sunScheduleTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
+        _sunScheduleTimer.Tick += OnSunScheduleTimerTick;
+
+        _headerClockTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _headerClockTimer.Tick += OnHeaderClockTimerTick;
+        _headerClockTimer.Start();
+        UpdateHeaderClockText();
 
         TypeFilterOptions = new ObservableCollection<string> { "全部", "单选", "多选", "判断", "简答", "填空" };
         DifficultyFilterOptions = new ObservableCollection<string> { "全部", "简单", "中等", "困难" };
@@ -117,6 +151,15 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             ExamDomainPicks.Add(new ExamDomainPickVm(MapUiToDomain(label), label));
         }
 
+        BankAiTemplateOptions = new ObservableCollection<string>
+        {
+            "单选题模板",
+            "多选题模板",
+            "判断题模板",
+            "简答题模板",
+            "填空题模板"
+        };
+
         WrongBookDomainFilterOptions = new ObservableCollection<string>(DomainFilterOptions);
         WrongBookDomainFilter = "全部";
         WrongBookSelectAllInFilterCaption = "本领域全选";
@@ -129,6 +172,13 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         ExamUserAnswer = string.Empty;
         StatusMessage = "就绪：请先刷新题库。";
         _wrongBookFilterEventsEnabled = true;
+
+        var themePrefs = ThemePreferenceStore.LoadPreferencesOrDefault();
+        UseSunAutoTheme = themePrefs.UseSunAutoTheme;
+        IsDarkTheme = AppTheme.IsDark;
+
+        RefreshSunScheduleAndApplyTheme();
+        _sunScheduleTimer.Start();
     }
 
     /// <summary>
@@ -172,6 +222,79 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     public ObservableCollection<string> EditorDomainOptions { get; }
 
     /// <summary>
+    /// 题库管理页：AI 出题模板下拉（与 <see cref="MapBankAiTemplateToType"/> 对应）。
+    /// </summary>
+    public ObservableCollection<string> BankAiTemplateOptions { get; }
+
+    /// <summary>
+    /// 题库管理页：当前选中的 AI 出题模板显示名。
+    /// </summary>
+    [ObservableProperty]
+    private string _selectedBankAiTemplate = "单选题模板";
+
+    /// <summary>
+    /// 题库管理页：希望生成的题目数量（服务端会裁剪到安全上限）。
+    /// </summary>
+    [ObservableProperty]
+    private int _bankAiGenCount = 3;
+
+    /// <summary>
+    /// 题库管理页：AI 出题请求进行中（用于禁用按钮）。
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanUseBankAiGen))]
+    [NotifyCanExecuteChangedFor(nameof(FillEditorQuestionFromAiCommand))]
+    private bool _isBankAiGenerating;
+
+    /// <summary>
+    /// 新建题目向导：向 AI 请求单题并填入编辑器时的忙碌状态。
+    /// </summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(FillEditorQuestionFromAiCommand))]
+    private bool _isEditorAiFillBusy;
+
+    /// <summary>
+    /// 编辑器「AI 出题」：是否在请求提示词中附带当前分类标签与检索关键词。
+    /// </summary>
+    [ObservableProperty]
+    private bool _editorAiSendTopicTagsToPrompt = true;
+
+    /// <summary>
+    /// 编辑器 AI 出题过程中展示的阶段文案（与不确定进度条配合）。
+    /// </summary>
+    [ObservableProperty]
+    private string _editorAiProgressPhase = string.Empty;
+
+    /// <summary>
+    /// 批量「AI 按模板生成」过程中的阶段文案。
+    /// </summary>
+    [ObservableProperty]
+    private string _bankAiProgressPhase = string.Empty;
+
+    /// <summary>
+    /// 考试页：模型返回的当前题讲解文本。
+    /// </summary>
+    [ObservableProperty]
+    private string _examAiExplanationText = string.Empty;
+
+    /// <summary>
+    /// 考试页：单题讲解请求进行中。
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanAskExamAi))]
+    private bool _isExamAiExplainBusy;
+
+    /// <summary>
+    /// 「AI 按模板生成并入库」按钮是否可用。
+    /// </summary>
+    public bool CanUseBankAiGen => !IsBankAiGenerating;
+
+    /// <summary>
+    /// 「不会，问 AI」按钮是否可用：考试中且未在请求讲解。
+    /// </summary>
+    public bool CanAskExamAi => IsExamRunning && !IsExamAiExplainBusy;
+
+    /// <summary>
     /// 刷题组卷时可多选的领域列表；若至少勾选一项，则仅从勾选领域抽题；若全部未勾选，则领域范围沿用「题库管理」页的领域下拉（「全部」表示不限）。
     /// </summary>
     public ObservableCollection<ExamDomainPickVm> ExamDomainPicks { get; } = new();
@@ -186,6 +309,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     /// 当前选中的题库题目（用于编辑/删除）。
     /// </summary>
     [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(FillEditorQuestionFromAiCommand))]
     private Question? _selectedBankQuestion;
 
     /// <summary>
@@ -211,6 +335,23 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     /// </summary>
     [ObservableProperty]
     private string _editorKnowledgeTags = string.Empty;
+
+    /// <summary>
+    /// 编辑器：领域内向细分分类标签（逗号分隔），参与 AI 推荐筛选。
+    /// </summary>
+    [ObservableProperty]
+    private string _editorTopicTags = string.Empty;
+
+    /// <summary>
+    /// 编辑器：检索关键词（逗号或分号分隔），参与 AI 推荐与题干匹配。
+    /// </summary>
+    [ObservableProperty]
+    private string _editorTopicKeywords = string.Empty;
+
+    /// <summary>
+    /// 分类标签快捷词表（与 <see cref="TopicTagCatalog.Presets"/> 一致），供题目编辑器一键追加。
+    /// </summary>
+    public IReadOnlyList<string> TopicTagPresetOptions => TopicTagCatalog.Presets;
 
     /// <summary>
     /// 编辑器：题型（字符串与 ComboBox 对齐）。
@@ -270,6 +411,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     /// 是否处于考试中（控制 UI 可用性）。
     /// </summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanAskExamAi))]
     private bool _isExamRunning;
 
     /// <summary>
@@ -427,6 +569,256 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     private string _statusMessage;
 
     /// <summary>
+    /// 当前是否为深色主题（与 <see cref="AppTheme.IsDark"/> 同步）。
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ThemeToggleToolTip))]
+    [NotifyPropertyChangedFor(nameof(ShowSunGlyph))]
+    [NotifyPropertyChangedFor(nameof(ShowMoonGlyph))]
+    private bool _isDarkTheme;
+
+    /// <summary>
+    /// 主题按钮提示：下一步将切换到的模式。
+    /// </summary>
+    public string ThemeToggleToolTip => IsDarkTheme ? "浅色" : "深色";
+
+    /// <summary>
+    /// 深色模式下显示太阳图标（将切到浅色）。
+    /// </summary>
+    public bool ShowSunGlyph => IsDarkTheme;
+
+    /// <summary>
+    /// 浅色模式下显示月亮图标（将切到深色）。
+    /// </summary>
+    public bool ShowMoonGlyph => !IsDarkTheme;
+
+    /// <summary>
+    /// 是否根据配置与日出日落自动切换主题（用户可关闭）。
+    /// </summary>
+    [ObservableProperty]
+    private bool _useSunAutoTheme = true;
+
+    /// <summary>
+    /// appsettings 中是否启用了日出日落功能（经纬度计算）。
+    /// </summary>
+    [ObservableProperty]
+    private bool _sunScheduleFeatureEnabled;
+
+    /// <summary>
+    /// 当日日出日落是否已成功计算（极区等情况可能失败）。
+    /// </summary>
+    [ObservableProperty]
+    private bool _sunTimesValid;
+
+    /// <summary>
+    /// 今日日出时间展示（HH:mm，本地）。
+    /// </summary>
+    [ObservableProperty]
+    private string _sunriseDisplayText = "—";
+
+    /// <summary>
+    /// 今日日落时间展示（HH:mm，本地）。
+    /// </summary>
+    [ObservableProperty]
+    private string _sunsetDisplayText = "—";
+
+    /// <summary>
+    /// 时间线左侧「午夜—日出」段宽度（像素）。
+    /// </summary>
+    [ObservableProperty]
+    private int _sunBarNight1Width;
+
+    /// <summary>
+    /// 时间线「日出—日落」白昼段宽度（像素）。
+    /// </summary>
+    [ObservableProperty]
+    private int _sunBarDayWidth;
+
+    /// <summary>
+    /// 时间线「日落—午夜」段宽度（像素）。
+    /// </summary>
+    [ObservableProperty]
+    private int _sunBarNight2Width;
+
+    /// <summary>
+    /// 当前时刻在时间线上的水平偏移（像素，用于指示线）。
+    /// </summary>
+    [ObservableProperty]
+    private double _sunIndicatorOffset;
+
+    /// <summary>
+    /// 当前处于白昼或夜晚的简短说明。
+    /// </summary>
+    [ObservableProperty]
+    private string _sunPhaseHint = string.Empty;
+
+    /// <summary>
+    /// 单行摘要：日出、日落与当前相位。
+    /// </summary>
+    [ObservableProperty]
+    private string _sunSummaryLine = string.Empty;
+
+    /// <summary>
+    /// 观测点经纬度说明（来自配置）。
+    /// </summary>
+    [ObservableProperty]
+    private string _sunLocationHint = string.Empty;
+
+    /// <summary>
+    /// 本机当前时间（与色条并列展示，每秒刷新）。
+    /// </summary>
+    [ObservableProperty]
+    private string _headerClockText = string.Empty;
+
+    /// <summary>
+    /// 是否展示日出日落时间线区域（配置启用且计算成功）。
+    /// </summary>
+    public bool ShowSunTimeline => SunScheduleFeatureEnabled && SunTimesValid;
+
+    /// <summary>
+    /// 配置启用了日出日落模块但计算失败时，用于展示提示文案。
+    /// </summary>
+    public bool ShowSunScheduleMessage => SunScheduleFeatureEnabled && !SunTimesValid;
+
+    partial void OnSunTimesValidChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ShowSunTimeline));
+        OnPropertyChanged(nameof(ShowSunScheduleMessage));
+    }
+
+    partial void OnSunScheduleFeatureEnabledChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ShowSunTimeline));
+        OnPropertyChanged(nameof(ShowSunScheduleMessage));
+    }
+
+    partial void OnUseSunAutoThemeChanged(bool value)
+    {
+        ThemePreferenceStore.SavePreferences(new ThemePreferenceState(IsDarkTheme, value));
+        if (value)
+        {
+            RefreshSunScheduleAndApplyTheme();
+        }
+    }
+
+    /// <summary>
+    /// 定时器：刷新日出日落时间线并按策略校正主题。
+    /// </summary>
+    private void OnSunScheduleTimerTick(object? sender, EventArgs e) => RefreshSunScheduleAndApplyTheme();
+
+    /// <summary>
+    /// 定时器：更新顶栏当前时间文本。
+    /// </summary>
+    private void OnHeaderClockTimerTick(object? sender, EventArgs e) => UpdateHeaderClockText();
+
+    /// <summary>
+    /// 将 <see cref="HeaderClockText"/> 设为当前本机时间字符串。
+    /// </summary>
+    private void UpdateHeaderClockText()
+    {
+        HeaderClockText = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+    }
+
+    /// <summary>
+    /// 读取本机日期与配置经纬度，更新日出/日落展示与时间线比例；若启用自动主题则切换昼夜资源。
+    /// </summary>
+    private void RefreshSunScheduleAndApplyTheme()
+    {
+        var sun = _configuration.GetSection("SunSchedule").Get<SunScheduleOptions>() ?? new SunScheduleOptions();
+        SunScheduleFeatureEnabled = sun.EnableAutoTheme;
+        SunLocationHint = FormatLatLonHint(sun.Latitude, sun.Longitude);
+
+        if (!sun.EnableAutoTheme)
+        {
+            SunTimesValid = false;
+            SunriseDisplayText = "—";
+            SunsetDisplayText = "—";
+            SunBarNight1Width = SunBarDayWidth = SunBarNight2Width = 0;
+            SunIndicatorOffset = 0;
+            SunPhaseHint = "日出日落自动主题已在配置中关闭。";
+            SunSummaryLine = string.Empty;
+            return;
+        }
+
+        if (!SunCalcLite.TryGetSunriseSunsetLocal(DateTime.Today, sun.Latitude, sun.Longitude, out var rise, out var set))
+        {
+            SunTimesValid = false;
+            SunriseDisplayText = "—";
+            SunsetDisplayText = "—";
+            SunBarNight1Width = SunBarDayWidth = SunBarNight2Width = 0;
+            SunIndicatorOffset = 0;
+            SunPhaseHint = "当前纬度/日期下无法计算日出日落（例如极昼极夜区），请调整 SunSchedule 纬度或关闭自动。";
+            SunSummaryLine = SunPhaseHint;
+            return;
+        }
+
+        SunTimesValid = true;
+        SunriseDisplayText = rise.ToString("HH:mm");
+        SunsetDisplayText = set.ToString("HH:mm");
+
+        const int barTotal = 400;
+        var dayStart = DateTime.Today;
+        var now = DateTime.Now;
+        var h24 = 24.0;
+        var night1H = Math.Max(0, (rise - dayStart).TotalHours);
+        var dayH = Math.Max(0, (set - rise).TotalHours);
+        var night2H = Math.Max(0, h24 - night1H - dayH);
+        var scale = barTotal / h24;
+        SunBarNight1Width = (int)Math.Round(night1H * scale);
+        SunBarDayWidth = (int)Math.Round(dayH * scale);
+        SunBarNight2Width = barTotal - SunBarNight1Width - SunBarDayWidth;
+        var posH = Math.Clamp((now - dayStart).TotalHours, 0, h24);
+        SunIndicatorOffset = Math.Clamp(posH * scale - 1, 0, barTotal - 2);
+
+        if (now < rise)
+        {
+            SunPhaseHint = $"夜晚（距日出约 {FormatDuration(rise - now)}）";
+        }
+        else if (now < set)
+        {
+            SunPhaseHint = $"白昼（距日落约 {FormatDuration(set - now)}）";
+        }
+        else
+        {
+            SunPhaseHint = $"夜晚（距明日日出见时间线；已过日落 {FormatDuration(now - set)}）";
+        }
+
+        SunSummaryLine = $"今日日出 {SunriseDisplayText} · 日落 {SunsetDisplayText} · {SunPhaseHint}";
+
+        if (!UseSunAutoTheme || !sun.EnableAutoTheme)
+        {
+            return;
+        }
+
+        var wantDark = DayNightThemeBootstrap.IsNight(now, rise, set);
+        if (wantDark == IsDarkTheme)
+        {
+            return;
+        }
+
+        IsDarkTheme = wantDark;
+        AppTheme.Apply(wantDark);
+        ThemePreferenceStore.SavePreferences(new ThemePreferenceState(wantDark, true));
+    }
+
+    private static string FormatLatLonHint(double lat, double lon)
+    {
+        var ns = lat >= 0 ? "N" : "S";
+        var ew = lon >= 0 ? "E" : "W";
+        return $"观测点 {Math.Abs(lat):F2}°{ns}，{Math.Abs(lon):F2}°{ew}（appsettings.json → SunSchedule）";
+    }
+
+    private static string FormatDuration(TimeSpan ts)
+    {
+        if (ts.TotalHours >= 1)
+        {
+            return $"{(int)ts.TotalHours} 小时 {ts.Minutes} 分";
+        }
+
+        return $"{Math.Max(1, ts.Minutes)} 分";
+    }
+
+    /// <summary>
     /// AI 请求当前阶段（空闲 / 正在发送 / 成功 / 失败）。
     /// </summary>
     [ObservableProperty]
@@ -454,6 +846,10 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         _examTimer.Tick -= OnExamTimerTick;
         _examTimer.Stop();
+        _sunScheduleTimer.Tick -= OnSunScheduleTimerTick;
+        _sunScheduleTimer.Stop();
+        _headerClockTimer.Tick -= OnHeaderClockTimerTick;
+        _headerClockTimer.Stop();
     }
 
     /// <summary>
@@ -558,9 +954,23 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         EditorStandardAnswer = value.StandardAnswer;
         EditorOptionsJson = value.OptionsJson ?? string.Empty;
         EditorKnowledgeTags = value.KnowledgeTags;
+        EditorTopicTags = value.TopicTags ?? string.Empty;
+        EditorTopicKeywords = value.TopicKeywords ?? string.Empty;
         EditorType = MapTypeToUi(value.Type);
         EditorDifficulty = MapDifficultyToUi(value.Difficulty);
         EditorDomain = MapDomainToUi(value.Domain);
+    }
+
+    /// <summary>
+    /// 在浅色与深色主题之间切换并写入本地偏好。
+    /// </summary>
+    [RelayCommand]
+    private void ToggleTheme()
+    {
+        UseSunAutoTheme = false;
+        IsDarkTheme = !IsDarkTheme;
+        AppTheme.Apply(IsDarkTheme);
+        ThemePreferenceStore.SavePreferences(new ThemePreferenceState(IsDarkTheme, false));
     }
 
     /// <summary>
@@ -631,6 +1041,8 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
                     StandardAnswer = EditorStandardAnswer.Trim(),
                     OptionsJson = string.IsNullOrWhiteSpace(EditorOptionsJson) ? null : EditorOptionsJson.Trim(),
                     KnowledgeTags = string.IsNullOrWhiteSpace(EditorKnowledgeTags) ? "未分类" : EditorKnowledgeTags.Trim(),
+                    TopicTags = string.IsNullOrWhiteSpace(EditorTopicTags) ? string.Empty : EditorTopicTags.Trim(),
+                    TopicKeywords = string.IsNullOrWhiteSpace(EditorTopicKeywords) ? string.Empty : EditorTopicKeywords.Trim(),
                     Type = type,
                     Difficulty = diff,
                     Domain = domain,
@@ -651,6 +1063,8 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
                 entity.StandardAnswer = EditorStandardAnswer.Trim();
                 entity.OptionsJson = string.IsNullOrWhiteSpace(EditorOptionsJson) ? null : EditorOptionsJson.Trim();
                 entity.KnowledgeTags = string.IsNullOrWhiteSpace(EditorKnowledgeTags) ? "未分类" : EditorKnowledgeTags.Trim();
+                entity.TopicTags = string.IsNullOrWhiteSpace(EditorTopicTags) ? string.Empty : EditorTopicTags.Trim();
+                entity.TopicKeywords = string.IsNullOrWhiteSpace(EditorTopicKeywords) ? string.Empty : EditorTopicKeywords.Trim();
                 entity.Type = type;
                 entity.Difficulty = diff;
                 entity.Domain = domain;
@@ -669,6 +1083,101 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// 将快捷词追加到编辑器中的分类标签（逗号分隔，忽略大小写重复）。
+    /// </summary>
+    /// <param name="token">预设标签文本。</param>
+    [RelayCommand]
+    private void AppendTopicTag(string? token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return;
+        }
+
+        var t = token.Trim();
+        var parts = ParseTopicTagsToList(EditorTopicTags);
+        if (parts.Exists(p => string.Equals(p, t, StringComparison.OrdinalIgnoreCase)))
+        {
+            StatusMessage = $"标签「{t}」已在当前编辑内容中。";
+            return;
+        }
+
+        parts.Add(t);
+        EditorTopicTags = string.Join(",", parts);
+    }
+
+    /// <summary>
+    /// 仅更新一道题的 <see cref="Question.TopicTags"/>（用于表格内联编辑提交）。
+    /// </summary>
+    /// <param name="questionId">题目主键。</param>
+    /// <param name="topicTagsRaw">原始标签串（逗号/分号/中英文标点分隔）。</param>
+    public async Task SaveBankQuestionTopicTagsAsync(long questionId, string topicTagsRaw)
+    {
+        var normalized = string.IsNullOrWhiteSpace(topicTagsRaw) ? string.Empty : topicTagsRaw.Trim();
+        if (normalized.Length > 512)
+        {
+            normalized = normalized[..512];
+            StatusMessage = "分类标签已截断至 512 字以符合库表限制。";
+        }
+
+        try
+        {
+            await using var db = await _dbFactory.CreateDbContextAsync();
+            var entity = await db.Questions.FirstOrDefaultAsync(x => x.Id == questionId);
+            if (entity is null)
+            {
+                StatusMessage = $"未找到题目 Id={questionId}，分类标签未保存。";
+                return;
+            }
+
+            entity.TopicTags = normalized;
+            await db.SaveChangesAsync();
+
+            var row = BankQuestions.FirstOrDefault(x => x.Id == questionId);
+            if (row is not null)
+            {
+                row.TopicTags = normalized;
+            }
+
+            if (SelectedBankQuestion?.Id == questionId)
+            {
+                EditorTopicTags = normalized;
+            }
+
+            StatusMessage = $"已保存题目 {questionId} 的分类标签。";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "保存分类标签失败 Id={QuestionId}", questionId);
+            StatusMessage = "保存分类标签失败：" + ex.Message;
+            MessageBox.Show("保存分类标签失败：" + ex.Message, "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    /// <summary>
+    /// 将分类标签字符串拆成有序列表（去首尾空白，保留大小写）。
+    /// </summary>
+    private static List<string> ParseTopicTagsToList(string raw)
+    {
+        var list = new List<string>();
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return list;
+        }
+
+        foreach (var segment in raw.Split(new[] { ',', '，', ';', '；' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var s = segment.Trim();
+            if (s.Length > 0)
+            {
+                list.Add(s);
+            }
+        }
+
+        return list;
+    }
+
+    /// <summary>
     /// 新建题目（清空编辑器与选中项）。
     /// </summary>
     [RelayCommand]
@@ -679,6 +1188,8 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         EditorStandardAnswer = string.Empty;
         EditorOptionsJson = string.Empty;
         EditorKnowledgeTags = string.Empty;
+        EditorTopicTags = string.Empty;
+        EditorTopicKeywords = string.Empty;
         EditorType = "单选";
         EditorDifficulty = "简单";
         EditorDomain = "未分类";
@@ -987,6 +1498,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         ExamProgressLabel = string.Empty;
         ExamUserAnswer = string.Empty;
         ExamDisplayIndex = 0;
+        ExamAiExplanationText = string.Empty;
         StatusMessage = "已取消考试。";
     }
 
@@ -1107,6 +1619,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         ExamProgressLabel = string.Empty;
         ExamUserAnswer = string.Empty;
         ExamDisplayIndex = 0;
+        ExamAiExplanationText = string.Empty;
         }
         finally
         {
@@ -1433,7 +1946,15 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     {
         try
         {
-            var dialogResult = MessageBox.Show("是否发送请求给 AI 进行题目推荐？", "AI 推荐", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            var domainScope = MapUiToDomainOrNull(WrongBookDomainFilter);
+            var selectedWrong = _wrongBookAnalysisSelectionIds.OrderBy(x => x).ToList();
+            var dialogResult = MessageBox.Show(
+                "是否发送请求给 AI 进行题目推荐？\n\n" +
+                $"当前错题本「领域」筛选：{WrongBookDomainFilter}（非「全部」时，候选与错题统计均限定该领域）。\n" +
+                $"已勾选错题：{selectedWrong.Count} 道（其 TopicTags/TopicKeywords 与知识点将写入请求；推荐结果会排除错题本中的题目）。",
+                "AI 推荐",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
             if (dialogResult != MessageBoxResult.Yes)
             {
                 StatusMessage = "已取消 AI 题目推荐。";
@@ -1443,7 +1964,12 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             SetAiMainOutputLoading(true, "正在发送题目推荐请求并等待 AI 返回…");
             AppendAiLog("题目推荐：请求 Ark chat/completions");
             SetAiPipeline("正在发送", "题目推荐");
-            var dto = await _recommendation.RecommendAsync(DatabaseInitializer.DemoUserId).ConfigureAwait(false);
+            var request = new QuestionRecommendationRequest
+            {
+                SelectedWrongQuestionIds = selectedWrong,
+                DomainScope = domainScope
+            };
+            var dto = await _recommendation.RecommendAsync(DatabaseInitializer.DemoUserId, request).ConfigureAwait(false);
             _recommendedQuestionIds = dto.RecommendedQuestionIds.ToList();
 
             AiOutputText = await BuildRecommendationDisplayTextAsync(dto).ConfigureAwait(false);
@@ -1685,9 +2211,11 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             ExamOptionsDisplay = string.Empty;
             ExamProgressLabel = string.Empty;
             ExamUserAnswer = string.Empty;
+            ExamAiExplanationText = string.Empty;
             return;
         }
 
+        ExamAiExplanationText = string.Empty;
         var q = _examQuestions[ExamDisplayIndex - 1];
         ExamStem = q.Stem;
         ExamTypeText = MapTypeToUi(q.Type);
@@ -1994,6 +2522,16 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         if (!string.IsNullOrWhiteSpace(recommendation.Rationale))
             sb.AppendLine(recommendation.Rationale.Trim());
 
+        if (recommendation.FocusTags.Count > 0)
+        {
+            sb.AppendLine("AI 聚焦分类标签：" + string.Join("、", recommendation.FocusTags));
+        }
+
+        if (recommendation.FocusKeywords.Count > 0)
+        {
+            sb.AppendLine("AI 聚焦关键词：" + string.Join("、", recommendation.FocusKeywords));
+        }
+
         sb.AppendLine("推荐题目 Id：");
         sb.AppendLine(string.Join(", ", ids));
 
@@ -2036,8 +2574,12 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             }
 
             var stem = q.Stem.Length > 72 ? q.Stem[..72] + "…" : q.Stem;
-            var tagPart = string.IsNullOrWhiteSpace(q.KnowledgeTags) ? string.Empty : $"  标签：{q.KnowledgeTags}";
-            sb.AppendLine($"  · Id={q.Id}  [{MapTypeToUi(q.Type)}·{MapDifficultyToUi(q.Difficulty)}] {stem}{tagPart}");
+            var domainPart = $"领域:{MapDomainToUi(q.Domain)}";
+            var tagPart = string.IsNullOrWhiteSpace(q.KnowledgeTags) ? string.Empty : $"  知识点:{q.KnowledgeTags}";
+            var topicPart = string.IsNullOrWhiteSpace(q.TopicTags) ? string.Empty : $"  分类:{q.TopicTags}";
+            var kwPart = string.IsNullOrWhiteSpace(q.TopicKeywords) ? string.Empty : $"  关键词:{q.TopicKeywords}";
+            sb.AppendLine(
+                $"  · Id={q.Id}  [{MapTypeToUi(q.Type)}·{MapDifficultyToUi(q.Difficulty)}] {domainPart} {stem}{tagPart}{topicPart}{kwPart}");
         }
 
         return sb.ToString().TrimEnd();
@@ -2147,6 +2689,314 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         "计算机网络" => QuestionDomain.ComputerNetwork,
         _ => null
     };
+
+    /// <summary>
+    /// 将题库管理页「AI 出题模板」显示名映射为领域题型枚举。
+    /// </summary>
+    /// <param name="templateDisplay">下拉选中项，例如「单选题模板」。</param>
+    /// <returns>对应的 <see cref="QuestionType"/>。</returns>
+    private static QuestionType MapBankAiTemplateToType(string templateDisplay) => templateDisplay switch
+    {
+        "多选题模板" => QuestionType.MultipleChoice,
+        "判断题模板" => QuestionType.TrueFalse,
+        "简答题模板" => QuestionType.ShortAnswer,
+        "填空题模板" => QuestionType.FillInBlank,
+        _ => QuestionType.SingleChoice
+    };
+
+    /// <summary>
+    /// 仅在「新建题目」（未选中表格行）时可用：按编辑器中的领域、题型、难度与分类标签/关键词向 AI 请求一道题，并填入表单；入库需用户点击「保存题目」。
+    /// </summary>
+    /// <returns>表示异步操作的任务。</returns>
+    [RelayCommand(CanExecute = nameof(CanFillEditorQuestionFromAi))]
+    private async Task FillEditorQuestionFromAiAsync()
+    {
+        if (SelectedBankQuestion is not null)
+        {
+            return;
+        }
+
+        var confirm = MessageBox.Show(
+            $"将按当前设置向 AI 请求 1 道题目：\n领域「{EditorDomain}」、题型「{EditorType}」、难度「{EditorDifficulty}」。\n" +
+            "生成结果将填入右侧编辑器；确认无误后请点击「保存题目」写入题库。\n\n是否继续？",
+            "AI 出题（新建）",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+        if (confirm != MessageBoxResult.Yes)
+        {
+            StatusMessage = "已取消 AI 出题。";
+            return;
+        }
+
+        var sendHints = true;
+        var tags = string.Empty;
+        var kws = string.Empty;
+        var editorDomainDisplay = string.Empty;
+        var domain = QuestionDomain.Uncategorized;
+        var templateType = QuestionType.SingleChoice;
+        var diff = DifficultyLevel.Easy;
+        Ui(() =>
+        {
+            IsEditorAiFillBusy = true;
+            EditorAiProgressPhase = "准备发送…";
+            sendHints = EditorAiSendTopicTagsToPrompt;
+            tags = (EditorTopicTags ?? string.Empty).Trim();
+            kws = (EditorTopicKeywords ?? string.Empty).Trim();
+            editorDomainDisplay = EditorDomain;
+            domain = MapUiToDomain(EditorDomain);
+            templateType = MapUiToType(EditorType);
+            diff = MapUiToDifficulty(EditorDifficulty);
+        });
+        try
+        {
+            AppendAiLog($"编辑器 AI 单题：领域={editorDomainDisplay}，题型={templateType}，难度={diff}");
+            SetAiPipeline("正在发送", "编辑器 AI 单题");
+            await Task.Delay(60).ConfigureAwait(false);
+            Ui(() => EditorAiProgressPhase = "发送中，等待模型响应…");
+
+            var hints = new QuestionBankGenerationHints
+            {
+                RequiredDifficulty = diff,
+                TopicTagsHint = sendHints && !string.IsNullOrEmpty(tags) ? tags : null,
+                TopicKeywordsHint = sendHints && !string.IsNullOrEmpty(kws) ? kws : null
+            };
+
+            var result = await _questionBankAi
+                .GenerateQuestionsAsync(domain, editorDomainDisplay, templateType, 1, hints)
+                .ConfigureAwait(false);
+
+            Ui(() => EditorAiProgressPhase = "解析与校验完成，正在填入表单…");
+            await Task.Delay(80).ConfigureAwait(false);
+
+            if (result.Questions.Count == 0)
+            {
+                var detail = result.Errors.Count > 0
+                    ? string.Join(Environment.NewLine, result.Errors.Take(10))
+                    : "模型未返回通过校验的题目。";
+                Ui(() =>
+                {
+                    ApplyAiTraceToUi("编辑器 AI 单题");
+                    StatusMessage = "AI 出题失败或无有效题目。";
+                    AppendAiLog("编辑器 AI 单题失败详情：" + Environment.NewLine + detail);
+                    MessageBox.Show(detail, "AI 出题", MessageBoxButton.OK, MessageBoxImage.Warning);
+                });
+                return;
+            }
+
+            var q = result.Questions[0];
+            ApplyAiTraceToUi("编辑器 AI 单题");
+
+            if (result.Errors.Count > 0)
+            {
+                AppendAiLog("编辑器 AI 单题：另有未通过校验项 — " +
+                             string.Join(" | ", result.Errors.Take(12)));
+            }
+
+            Ui(() =>
+            {
+                EditorStem = q.Stem;
+                EditorStandardAnswer = q.StandardAnswer;
+                EditorOptionsJson = string.IsNullOrWhiteSpace(q.OptionsJson) ? string.Empty : q.OptionsJson;
+                EditorKnowledgeTags = string.IsNullOrWhiteSpace(q.KnowledgeTags) ? editorDomainDisplay : q.KnowledgeTags;
+                if (sendHints && !string.IsNullOrEmpty(tags))
+                {
+                    EditorTopicTags = tags;
+                }
+                else
+                {
+                    EditorTopicTags = string.IsNullOrWhiteSpace(q.TopicTags) ? string.Empty : q.TopicTags;
+                }
+
+                if (sendHints && !string.IsNullOrEmpty(kws))
+                {
+                    EditorTopicKeywords = kws;
+                }
+                else
+                {
+                    EditorTopicKeywords = string.IsNullOrWhiteSpace(q.TopicKeywords) ? string.Empty : q.TopicKeywords;
+                }
+
+                EditorType = MapTypeToUi(q.Type);
+                EditorDifficulty = MapDifficultyToUi(q.Difficulty);
+                SetAiPipeline("成功", "编辑器 AI 单题");
+                MessageBox.Show("已成功生成并填入题目。", "AI 出题", MessageBoxButton.OK, MessageBoxImage.Information);
+                StatusMessage = "已从 AI 填入题目，请检查后点击「保存题目」入库。";
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "编辑器 AI 单题失败");
+            SetAiPipeline("失败", FormatExceptionMessage(ex));
+            AppendAiLog("编辑器 AI 单题：失败 — " + FormatExceptionMessage(ex));
+            Ui(() =>
+            {
+                StatusMessage = "AI 出题失败：" + ex.Message;
+                MessageBox.Show("AI 出题失败：" + FormatExceptionMessage(ex), "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            });
+        }
+        finally
+        {
+            Ui(() =>
+            {
+                IsEditorAiFillBusy = false;
+                EditorAiProgressPhase = string.Empty;
+            });
+        }
+    }
+
+    /// <summary>
+    /// <see cref="FillEditorQuestionFromAiCommand"/> 的可用性：新建模式且未在请求中。
+    /// </summary>
+    private bool CanFillEditorQuestionFromAi() =>
+        SelectedBankQuestion is null && !IsEditorAiFillBusy && !IsBankAiGenerating;
+
+    /// <summary>
+    /// 调用 AI：按当前编辑器「领域」与所选模板生成题目，解析为 JSON 数组后批量写入题库。
+    /// </summary>
+    [RelayCommand]
+    private async Task GenerateBankQuestionsFromAiAsync()
+    {
+        var templateType = MapBankAiTemplateToType(SelectedBankAiTemplate);
+        var confirm = MessageBox.Show(
+            $"将以编辑器中的领域「{EditorDomain}」与模板「{SelectedBankAiTemplate}」向 AI 请求生成题目（数量约 {BankAiGenCount}，以模型输出为准）。\n" +
+            "模型须返回 JSON 数组；仅通过校验的题目会写入当前题库。是否继续？",
+            "AI 按模板出题",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+        if (confirm != MessageBoxResult.Yes)
+        {
+            StatusMessage = "已取消 AI 出题。";
+            return;
+        }
+
+        Ui(() =>
+        {
+            IsBankAiGenerating = true;
+            BankAiProgressPhase = "准备发送…";
+        });
+        try
+        {
+            AppendAiLog($"题库 AI 生成：领域={EditorDomain}，模板={SelectedBankAiTemplate}");
+            SetAiPipeline("正在发送", "题库 AI 生成");
+            await Task.Delay(60).ConfigureAwait(false);
+            Ui(() => BankAiProgressPhase = "发送中，等待模型响应…");
+            var domain = MapUiToDomain(EditorDomain);
+            var result = await _questionBankAi
+                .GenerateQuestionsAsync(domain, EditorDomain, templateType, BankAiGenCount)
+                .ConfigureAwait(false);
+
+            Ui(() => BankAiProgressPhase = "解析与写入题库…");
+            await Task.Delay(80).ConfigureAwait(false);
+
+            if (result.Questions.Count > 0)
+            {
+                await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(false);
+                db.Questions.AddRange(result.Questions);
+                await db.SaveChangesAsync().ConfigureAwait(false);
+            }
+
+            ApplyAiTraceToUi("题库 AI 生成");
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"写入成功 {result.Questions.Count} 题。");
+            if (result.Errors.Count > 0)
+            {
+                sb.AppendLine($"另有 {result.Errors.Count} 条未通过校验：");
+                foreach (var e in result.Errors.Take(12))
+                {
+                    sb.AppendLine(" - " + e);
+                }
+
+                if (result.Errors.Count > 12)
+                {
+                    sb.AppendLine($" - …（其余 {result.Errors.Count - 12} 条略）");
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(result.RawSnippet))
+            {
+                sb.AppendLine();
+                sb.AppendLine("模型输出片段（截断）：");
+                sb.AppendLine(result.RawSnippet);
+            }
+
+            var summary = sb.ToString().TrimEnd();
+            AppendAiLog("题库 AI 生成详情：" + Environment.NewLine + summary);
+            StatusMessage = $"AI 批量出题完成：已入库 {result.Questions.Count} 题。";
+            Ui(() =>
+            {
+                SetAiPipeline("成功", "题库 AI 生成");
+                MessageBox.Show(
+                    result.Questions.Count > 0
+                        ? $"已成功生成并入库 {result.Questions.Count} 题。"
+                        : "未写入任何题目，详情请查看下方 AI 日志。",
+                    "AI 出题",
+                    MessageBoxButton.OK,
+                    result.Questions.Count > 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
+            });
+
+            if (result.Questions.Count > 0)
+            {
+                await RefreshBankAsync().ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "题库 AI 生成失败");
+            SetAiPipeline("失败", FormatExceptionMessage(ex));
+            AppendAiLog("题库 AI 生成：失败 — " + FormatExceptionMessage(ex));
+            StatusMessage = "题库 AI 生成失败：" + ex.Message;
+            MessageBox.Show("题库 AI 生成失败：" + FormatExceptionMessage(ex), "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            Ui(() =>
+            {
+                IsBankAiGenerating = false;
+                BankAiProgressPhase = string.Empty;
+            });
+        }
+    }
+
+    /// <summary>
+    /// 考试中：将当前题（含用户已输入）发送给 AI 获取解析，并在成功后弹出调侃提示。
+    /// </summary>
+    [RelayCommand]
+    private async Task AskAiAboutCurrentExamQuestionAsync()
+    {
+        if (!IsExamRunning || _examQuestions.Count == 0 || ExamDisplayIndex < 1 || ExamDisplayIndex > _examQuestions.Count)
+        {
+            MessageBox.Show("请先开始考试并停留在某一题上。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        StoreCurrentAnswerSnapshot();
+        var q = _examQuestions[ExamDisplayIndex - 1];
+
+        Ui(() => IsExamAiExplainBusy = true);
+        try
+        {
+            AppendAiLog($"考试问 AI：题库 Id={q.Id}");
+            SetAiPipeline("正在发送", "单题讲解");
+            var text = await _examQuestionAi.ExplainQuestionAsync(q, ExamUserAnswer).ConfigureAwait(false);
+            Ui(() => ExamAiExplanationText = text);
+            ApplyAiTraceToUi("单题讲解");
+            MessageBox.Show("小瘪三，这都不会", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+            StatusMessage = "已获取当前题的 AI 解析。";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "考试单题 AI 讲解失败");
+            SetAiPipeline("失败", FormatExceptionMessage(ex));
+            AppendAiLog("单题讲解：失败 — " + FormatExceptionMessage(ex));
+            StatusMessage = "单题讲解失败：" + ex.Message;
+            MessageBox.Show("获取 AI 解析失败：" + FormatExceptionMessage(ex), "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            Ui(() => IsExamAiExplainBusy = false);
+        }
+    }
 
     /// <summary>
     /// 导入题库：打开文件选择对话框，选择 JSON 文件并导入。

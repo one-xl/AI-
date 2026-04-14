@@ -35,15 +35,9 @@ public static class QuestionSeedBuilder
                 {
                     case 0:
                     {
-                        var correctLetter = (char)('A' + ((i - 1) % 4));
-                        var opts = new string[4];
-                        for (var k = 0; k < 4; k++)
-                        {
-                            var letter = (char)('A' + k);
-                            opts[k] = letter == correctLetter
-                                ? $"{letter}. 本题正确选项"
-                                : $"{letter}. 干扰项（非正确）";
-                        }
+                        var variant = QuestionSeedContent.Variant(i);
+                        var (correctLetter, optionLines) = QuestionSeedContent.SingleChoice(domain, variant);
+                        var (topicTags, topicKeywords) = BuildTopicMeta(i, tag, "单选");
 
                         list.Add(new Question
                         {
@@ -52,8 +46,10 @@ public static class QuestionSeedBuilder
                             Domain = domain,
                             Stem = $"【{tag}】第{i}题（单选）：{SingleChoiceStem(domain, i)}",
                             StandardAnswer = correctLetter.ToString(),
-                            OptionsJson = Opt(opts),
+                            OptionsJson = Opt(optionLines),
                             KnowledgeTags = $"{tag},单选,批量种子",
+                            TopicTags = topicTags,
+                            TopicKeywords = topicKeywords,
                             IsEnabled = true,
                             CreatedAtUtc = nowUtc
                         });
@@ -63,6 +59,7 @@ public static class QuestionSeedBuilder
                     {
                         var tfRound = (i - 2) / 4;
                         var answerTrue = tfRound % 2 == 0;
+                        var (topicTags, topicKeywords) = BuildTopicMeta(i, tag, "判断");
                         list.Add(new Question
                         {
                             Type = QuestionType.TrueFalse,
@@ -72,62 +69,110 @@ public static class QuestionSeedBuilder
                             StandardAnswer = answerTrue ? "对" : "错",
                             OptionsJson = null,
                             KnowledgeTags = $"{tag},判断,批量种子",
+                            TopicTags = topicTags,
+                            TopicKeywords = topicKeywords,
                             IsEnabled = true,
                             CreatedAtUtc = nowUtc
                         });
                         break;
                     }
                     case 2:
+                    {
+                        var variantMc = QuestionSeedContent.Variant(i);
+                        var (multiStandard, multiOpts) = QuestionSeedContent.MultipleChoice(domain, variantMc);
+                        var (topicTags, topicKeywords) = BuildTopicMeta(i, tag, "多选");
                         list.Add(new Question
                         {
                             Type = QuestionType.MultipleChoice,
                             Difficulty = difficulty,
                             Domain = domain,
                             Stem = $"【{tag}】第{i}题（多选）：{MultipleChoiceStem(domain, i)}",
-                            StandardAnswer = "A,C",
-                            OptionsJson = Opt(
-                                "A. 正确表述之一",
-                                "B. 错误表述",
-                                "C. 正确表述之二",
-                                "D. 错误表述"),
+                            StandardAnswer = multiStandard,
+                            OptionsJson = Opt(multiOpts),
                             KnowledgeTags = $"{tag},多选,批量种子",
+                            TopicTags = topicTags,
+                            TopicKeywords = topicKeywords,
                             IsEnabled = true,
                             CreatedAtUtc = nowUtc
                         });
                         break;
+                    }
                     case 3:
+                    {
+                        var variantSa = QuestionSeedContent.Variant(i);
+                        var (shortStem, shortKeys) = QuestionSeedContent.ShortAnswer(domain, variantSa, i);
+                        var (topicTags, topicKeywords) = BuildTopicMeta(i, tag, "简答");
                         list.Add(new Question
                         {
                             Type = QuestionType.ShortAnswer,
                             Difficulty = difficulty,
                             Domain = domain,
-                            Stem = $"【{tag}】第{i}题（简答）：{ShortAnswerStem(domain, i)}",
-                            StandardAnswer = ShortAnswerKey(domain),
+                            Stem = shortStem,
+                            StandardAnswer = shortKeys,
                             OptionsJson = null,
                             KnowledgeTags = $"{tag},简答,批量种子",
+                            TopicTags = topicTags,
+                            TopicKeywords = topicKeywords,
                             IsEnabled = true,
                             CreatedAtUtc = nowUtc
                         });
                         break;
+                    }
                     default:
+                    {
+                        var variantFb = QuestionSeedContent.Variant(i);
+                        var (fillStem, fillRegex) = QuestionSeedContent.FillBlank(domain, variantFb, i);
+                        var (topicTags, topicKeywords) = BuildTopicMeta(i, tag, "填空");
                         list.Add(new Question
                         {
                             Type = QuestionType.FillInBlank,
                             Difficulty = difficulty,
                             Domain = domain,
-                            Stem = $"【{tag}】第{i}题（填空）：{FillBlankStem(domain, i)}",
-                            StandardAnswer = "(关键|核心|重点)",
+                            Stem = fillStem,
+                            StandardAnswer = fillRegex,
                             OptionsJson = null,
                             KnowledgeTags = $"{tag},填空,批量种子",
+                            TopicTags = topicTags,
+                            TopicKeywords = topicKeywords,
                             IsEnabled = true,
                             CreatedAtUtc = nowUtc
                         });
                         break;
+                    }
                 }
             }
         }
 
         return list;
+    }
+
+    /// <summary>
+    /// 为种子题生成分类标签与检索关键词，便于 AI 推荐按领域+标签筛选。
+    /// </summary>
+    private static (string TopicTags, string TopicKeywords) BuildTopicMeta(
+        int indexInDomain,
+        string domainTag,
+        string typeLabel)
+    {
+        var tier = (indexInDomain % 4) switch
+        {
+            0 => "基础",
+            1 => "进阶",
+            2 => "综合",
+            _ => "易错"
+        };
+        var track = (indexInDomain % 3) switch
+        {
+            0 => "概念",
+            1 => "应用",
+            _ => "辨析"
+        };
+        var extras = TopicTagCatalog.SeedExtraTags;
+        var extraA = extras[(indexInDomain * 3) % extras.Count];
+        var extraB = extras[(indexInDomain * 7 + 5) % extras.Count];
+        var topicTags = $"{domainTag}/{tier},{domainTag}/{track},{typeLabel},{extraA},{extraB}";
+        var topicKeywords = $"{tier}；{track}；{domainTag}；{typeLabel}；{extraA}；{extraB}；题组{indexInDomain % 9}";
+        return (topicTags, topicKeywords);
     }
 
     /// <summary>
@@ -242,62 +287,5 @@ public static class QuestionSeedBuilder
         QuestionDomain.OperatingSystem => $"下列关于操作系统的描述中正确的有（题组 {index}）。",
         QuestionDomain.ComputerNetwork => $"下列关于计算机网络的描述中正确的有（题组 {index}）。",
         _ => $"下列关于软件工程的描述中正确的有（题组 {index}）。"
-    };
-
-    /// <summary>
-    /// 填空题题干：提示用户输入需命中正则关键词。
-    /// </summary>
-    private static string FillBlankStem(QuestionDomain domain, int index) => domain switch
-    {
-        QuestionDomain.Python => $"请用一句话概括学习 Python 时的一个要点（题组 {index}），答案中须出现「关键」「核心」「重点」之一。",
-        QuestionDomain.C => $"请用一句话概括 C 语言学习的一个要点（题组 {index}），答案中须出现「关键」「核心」「重点」之一。",
-        QuestionDomain.CPlusPlus => $"请用一句话概括 C++ 学习的一个要点（题组 {index}），答案中须出现「关键」「核心」「重点」之一。",
-        QuestionDomain.CSharp => $"请用一句话概括 C# 学习的一个要点（题组 {index}），答案中须出现「关键」「核心」「重点」之一。",
-        QuestionDomain.Rust => $"请用一句话概括 Rust 学习的一个要点（题组 {index}），答案中须出现「关键」「核心」「重点」之一。",
-        QuestionDomain.Java => $"请用一句话概括 Java 学习的一个要点（题组 {index}），答案中须出现「关键」「核心」「重点」之一。",
-        QuestionDomain.JavaScript => $"请用一句话概括 JavaScript 学习的一个要点（题组 {index}），答案中须出现「关键」「核心」「重点」之一。",
-        QuestionDomain.Go => $"请用一句话概括 Go 学习的一个要点（题组 {index}），答案中须出现「关键」「核心」「重点」之一。",
-        QuestionDomain.DataStructure => $"请用一句话概括数据结构学习的一个要点（题组 {index}），答案中须出现「关键」「核心」「重点」之一。",
-        QuestionDomain.Database => $"请用一句话概括数据库学习的一个要点（题组 {index}），答案中须出现「关键」「核心」「重点」之一。",
-        QuestionDomain.OperatingSystem => $"请用一句话概括操作系统学习的一个要点（题组 {index}），答案中须出现「关键」「核心」「重点」之一。",
-        QuestionDomain.ComputerNetwork => $"请用一句话概括计算机网络学习的一个要点（题组 {index}），答案中须出现「关键」「核心」「重点」之一。",
-        _ => $"请用一句话概括本领域学习的一个要点（题组 {index}），答案中须出现「关键」「核心」「重点」之一。"
-    };
-
-    private static string ShortAnswerStem(QuestionDomain domain, int index) => domain switch
-    {
-        QuestionDomain.Python => $"请写出与 Python 相关的任一标准库或工具名（题组 {index}）。",
-        QuestionDomain.C => $"请写出 C 程序入口函数名（题组 {index}）。",
-        QuestionDomain.CPlusPlus => $"请写出 C++ 中用于标准输入输出的头文件之一（题组 {index}）。",
-        QuestionDomain.CSharp => $"请写出 C# 中用于异步的关键字之一（题组 {index}）。",
-        QuestionDomain.Rust => $"请写出 Rust 包管理工具名（题组 {index}）。",
-        QuestionDomain.Java => $"请写出 Java 源码文件扩展名（题组 {index}）。",
-        QuestionDomain.JavaScript => $"请写出一种运行 JavaScript 的环境或引擎名（题组 {index}）。",
-        QuestionDomain.Go => $"请写出 Go 模块文件常用名（题组 {index}）。",
-        QuestionDomain.DataStructure => $"请写出一种线性结构名称（题组 {index}）。",
-        QuestionDomain.Database => $"请写出一种关系型数据库产品名（题组 {index}）。",
-        QuestionDomain.OperatingSystem => $"请写出进程调度相关概念之一（题组 {index}）。",
-        QuestionDomain.ComputerNetwork => $"请写出 OSI 七层中任意一层名称（题组 {index}）。",
-        _ => $"请写出软件开发流程中的任一环节名称（题组 {index}）。"
-    };
-
-    /// <summary>
-    /// 简答题标准答案关键词（分号/逗号分隔多个关键词时判分需全部命中；此处每域仅给一个关键词，与对应题干一致，避免「答案过严」）。
-    /// </summary>
-    private static string ShortAnswerKey(QuestionDomain domain) => domain switch
-    {
-        QuestionDomain.Python => "pip",
-        QuestionDomain.C => "main",
-        QuestionDomain.CPlusPlus => "iostream",
-        QuestionDomain.CSharp => "async",
-        QuestionDomain.Rust => "cargo",
-        QuestionDomain.Java => "java",
-        QuestionDomain.JavaScript => "node",
-        QuestionDomain.Go => "go.mod",
-        QuestionDomain.DataStructure => "栈",
-        QuestionDomain.Database => "SQL",
-        QuestionDomain.OperatingSystem => "进程",
-        QuestionDomain.ComputerNetwork => "TCP",
-        _ => "需求"
     };
 }

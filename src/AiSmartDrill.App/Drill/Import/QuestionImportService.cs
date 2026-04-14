@@ -166,6 +166,8 @@ public sealed class QuestionImportService
             StandardAnswer = dto.StandardAnswer!.Trim(),
             OptionsJson = string.IsNullOrWhiteSpace(dto.OptionsJson) ? null : dto.OptionsJson.Trim(),
             KnowledgeTags = string.IsNullOrWhiteSpace(dto.KnowledgeTags) ? "未分类" : dto.KnowledgeTags.Trim(),
+            TopicTags = string.IsNullOrWhiteSpace(dto.TopicTags) ? string.Empty : dto.TopicTags.Trim(),
+            TopicKeywords = string.IsNullOrWhiteSpace(dto.TopicKeywords) ? string.Empty : dto.TopicKeywords.Trim(),
             IsEnabled = dto.IsEnabled ?? true,
             CreatedAtUtc = DateTime.UtcNow
         };
@@ -183,6 +185,8 @@ public sealed class QuestionImportDto
     public string? StandardAnswer { get; init; }
     public string? OptionsJson { get; init; }
     public string? KnowledgeTags { get; init; }
+    public string? TopicTags { get; init; }
+    public string? TopicKeywords { get; init; }
     public bool? IsEnabled { get; init; }
 }
 

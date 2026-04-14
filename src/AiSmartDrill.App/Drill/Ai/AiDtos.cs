@@ -44,6 +44,22 @@ public sealed class WrongQuestionInsightDto
 }
 
 /// <summary>
+/// 调用 AI 题目推荐时的上下文：错题本勾选、领域范围与排除规则由 UI 传入。
+/// </summary>
+public sealed class QuestionRecommendationRequest
+{
+    /// <summary>
+    /// 获取错题本中用户勾选的题目 Id；其 TopicTags/TopicKeywords 会作为 AI 的主要信号。
+    /// </summary>
+    public IReadOnlyList<long> SelectedWrongQuestionIds { get; init; } = Array.Empty<long>();
+
+    /// <summary>
+    /// 获取「错题本 / AI」页领域筛选：为 null 表示「全部」领域；非 null 时候选与错题统计均限定该领域。
+    /// </summary>
+    public QuestionDomain? DomainScope { get; init; }
+}
+
+/// <summary>
 /// 表示 AI 题目推荐返回的候选题集合。
 /// </summary>
 public sealed class QuestionRecommendationDto
@@ -52,6 +68,16 @@ public sealed class QuestionRecommendationDto
     /// 获取或设置推荐理由。
     /// </summary>
     public string Rationale { get; init; } = string.Empty;
+
+    /// <summary>
+    /// 获取或设置模型给出的聚焦分类标签（用于服务端二次筛选）。
+    /// </summary>
+    public IReadOnlyList<string> FocusTags { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// 获取或设置模型给出的聚焦关键词（用于服务端二次筛选）。
+    /// </summary>
+    public IReadOnlyList<string> FocusKeywords { get; init; } = Array.Empty<string>();
 
     /// <summary>
     /// 获取或设置推荐题目 Id 列表（来自题库）。
