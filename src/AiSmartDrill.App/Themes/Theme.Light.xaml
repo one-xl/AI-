@@ -1,46 +1,46 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <!-- HashiCorp-inspired light: high contrast monochrome + same accent hue. -->
-    <SolidColorBrush x:Key="Brush.Background" Color="#FAFAFA" />
+    <!-- 现代浅色主题：柔和中性 + 蓝色强调 -->
+    <SolidColorBrush x:Key="Brush.Background" Color="#F8F8FA" />
     <SolidColorBrush x:Key="Brush.Surface" Color="#FFFFFF" />
-    <SolidColorBrush x:Key="Brush.SurfaceElevated" Color="#F4F4F5" />
-    <SolidColorBrush x:Key="Brush.Text" Color="#0A0A0A" />
-    <SolidColorBrush x:Key="Brush.TextMuted" Color="#71717A" />
-    <SolidColorBrush x:Key="Brush.Border" Color="#E4E4E7" />
-    <SolidColorBrush x:Key="Brush.BorderStrong" Color="#D4D4D8" />
+    <SolidColorBrush x:Key="Brush.SurfaceElevated" Color="#F1F1F4" />
+    <SolidColorBrush x:Key="Brush.Text" Color="#111114" />
+    <SolidColorBrush x:Key="Brush.TextMuted" Color="#6C6C76" />
+    <SolidColorBrush x:Key="Brush.Border" Color="#DFDFE4" />
+    <SolidColorBrush x:Key="Brush.BorderStrong" Color="#C8C8D0" />
     <SolidColorBrush x:Key="Brush.Accent" Color="#2563EB" />
     <SolidColorBrush x:Key="Brush.OnAccent" Color="#FFFFFF" />
 
     <SolidColorBrush x:Key="Brush.InputBackground" Color="#FFFFFF" />
-    <SolidColorBrush x:Key="Brush.InputBorder" Color="#D4D4D8" />
-    <SolidColorBrush x:Key="Brush.ComboHoverMain" Color="#F4F4F5" />
+    <SolidColorBrush x:Key="Brush.InputBorder" Color="#C8C8D0" />
+    <SolidColorBrush x:Key="Brush.ComboHoverMain" Color="#F1F1F4" />
     <SolidColorBrush x:Key="Brush.ComboFocusMain" Color="#FFFFFF" />
     <SolidColorBrush x:Key="Brush.ComboDropdownBackground" Color="#FFFFFF" />
-    <SolidColorBrush x:Key="Brush.ComboItemHover" Color="#F4F4F5" />
+    <SolidColorBrush x:Key="Brush.ComboItemHover" Color="#F1F1F4" />
     <SolidColorBrush x:Key="Brush.ButtonBackground" Color="#FFFFFF" />
-    <SolidColorBrush x:Key="Brush.ButtonHover" Color="#F4F4F5" />
-    <SolidColorBrush x:Key="Brush.ButtonPressed" Color="#E4E4E7" />
-    <SolidColorBrush x:Key="Brush.ButtonHoverBorder" Color="#A1A1AA" />
+    <SolidColorBrush x:Key="Brush.ButtonHover" Color="#F1F1F4" />
+    <SolidColorBrush x:Key="Brush.ButtonPressed" Color="#DFDFE4" />
+    <SolidColorBrush x:Key="Brush.ButtonHoverBorder" Color="#9898A0" />
 
-    <SolidColorBrush x:Key="Brush.TabPanelBackground" Color="#FAFAFA" />
-    <SolidColorBrush x:Key="Brush.TabItemBackground" Color="#F4F4F5" />
-    <SolidColorBrush x:Key="Brush.TabItemText" Color="#3F3F46" />
-    <SolidColorBrush x:Key="Brush.TabItemSelectedBackground" Color="#FAFAFA" />
-    <SolidColorBrush x:Key="Brush.TabItemHoverBackground" Color="#E4E4E7" />
+    <SolidColorBrush x:Key="Brush.TabPanelBackground" Color="#F8F8FA" />
+    <SolidColorBrush x:Key="Brush.TabItemBackground" Color="#F1F1F4" />
+    <SolidColorBrush x:Key="Brush.TabItemText" Color="#3B3B44" />
+    <SolidColorBrush x:Key="Brush.TabItemSelectedBackground" Color="#F8F8FA" />
+    <SolidColorBrush x:Key="Brush.TabItemHoverBackground" Color="#DFDFE4" />
 
     <SolidColorBrush x:Key="Brush.DataGridBackground" Color="#FFFFFF" />
-    <SolidColorBrush x:Key="Brush.DataGridRowAlt" Color="#FAFAFA" />
-    <SolidColorBrush x:Key="Brush.DataGridHeaderBackground" Color="#F4F4F5" />
-    <SolidColorBrush x:Key="Brush.DataGridCellSelected" Color="#E4E4E7" />
+    <SolidColorBrush x:Key="Brush.DataGridRowAlt" Color="#F8F8FA" />
+    <SolidColorBrush x:Key="Brush.DataGridHeaderBackground" Color="#F1F1F4" />
+    <SolidColorBrush x:Key="Brush.DataGridCellSelected" Color="#DFDFE4" />
 
     <SolidColorBrush x:Key="Brush.ListBackground" Color="#FFFFFF" />
-    <SolidColorBrush x:Key="Brush.ListItemHover" Color="#F4F4F5" />
-    <SolidColorBrush x:Key="Brush.ListItemSelected" Color="#E4E4E7" />
+    <SolidColorBrush x:Key="Brush.ListItemHover" Color="#F1F1F4" />
+    <SolidColorBrush x:Key="Brush.ListItemSelected" Color="#DFDFE4" />
 
-    <SolidColorBrush x:Key="Brush.ProgressTrack" Color="#E4E4E7" />
-    <SolidColorBrush x:Key="Brush.OverlayScrim" Color="#CCFAFAFA" />
+    <SolidColorBrush x:Key="Brush.ProgressTrack" Color="#DFDFE4" />
+    <SolidColorBrush x:Key="Brush.OverlayScrim" Color="#CCF8F8FA" />
 
-    <SolidColorBrush x:Key="Brush.CountdownStripBackground" Color="#F4F4F5" />
+    <SolidColorBrush x:Key="Brush.CountdownStripBackground" Color="#F1F1F4" />
     <SolidColorBrush x:Key="Brush.HeaderBarBackground" Color="#FFFFFF" />
-    <SolidColorBrush x:Key="Brush.FooterBarBackground" Color="#F4F4F5" />
+    <SolidColorBrush x:Key="Brush.FooterBarBackground" Color="#F1F1F4" />
 </ResourceDictionary>

@@ -1,15 +1,18 @@
-﻿<Window x:Class="AiSmartDrill.App.MainWindow"
+<Window x:Class="AiSmartDrill.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:AiSmartDrill.App.ViewModels"
+        xmlns:cfg="clr-namespace:AiSmartDrill.App.Drill.Ai.Config"
+        xmlns:conv="clr-namespace:AiSmartDrill.App.Converters"
         mc:Ignorable="d"
         Title="AI 智能题库与刷题系统"
         Height="760"
         Width="1180"
         Closed="MainWindow_OnClosed">
     <Window.Resources>
+        <conv:OptionsJsonToDisplayConverter x:Key="OptionsJsonDisplayConverter" />
         <Style x:Key="ExamTrueButtonStyle" TargetType="Button" BasedOn="{StaticResource ChromeButtonStyle}">
             <Setter Property="MinWidth" Value="120" />
             <Setter Property="MinHeight" Value="44" />
@@ -48,19 +51,83 @@
                 BorderThickness="1"
                 Margin="0,0,0,12">
             <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" MinWidth="160" />
+                    <ColumnDefinition Width="*" MinWidth="120" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0"
+                <TextBlock Grid.Row="0"
+                           Grid.Column="0"
                            FontSize="20"
                            FontWeight="SemiBold"
                            VerticalAlignment="Center"
                            Text="AI 智能题库与刷题系统" />
-                <StackPanel Grid.Column="1"
-                            Margin="16,0"
+                <StackPanel Grid.Row="0"
+                            Grid.Column="1"
+                            Orientation="Horizontal"
                             VerticalAlignment="Center"
+                            Margin="12,0,0,0">
+                    <Label Content="AI 模型" VerticalAlignment="Center" Margin="0,0,4,0" />
+                    <ComboBox MinWidth="200"
+                              MaxWidth="280"
+                              Margin="0,0,6,0"
+                              VerticalAlignment="Center"
+                              ItemsSource="{Binding AiModelProfileOptions}"
+                              SelectedItem="{Binding SelectedAiModelProfile, Mode=TwoWay}">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate DataType="{x:Type cfg:DoubaoModelProfileListItem}">
+                                <TextBlock Text="{Binding DisplayLabel}"
+                                           TextTrimming="CharacterEllipsis"
+                                           Foreground="{DynamicResource Brush.Text}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <Button Content="＋"
+                            ToolTip="增加模型"
+                            Padding="6,4"
+                            Margin="0,0,12,0"
+                            VerticalAlignment="Center"
+                            Command="{Binding AddAiModelProfileCommand}" />
+                    <CheckBox Margin="0,0,12,0"
+                              VerticalAlignment="Center"
+                              Content="按日出/日落自动主题"
+                              IsChecked="{Binding UseSunAutoTheme, Mode=TwoWay}"
+                              IsEnabled="{Binding SunScheduleFeatureEnabled}" />
+                    <Button Command="{Binding ToggleThemeCommand}"
+                            ToolTip="{Binding ThemeToggleToolTip}"
+                            Padding="8,6"
+                            Margin="0,0,12,0"
+                            VerticalAlignment="Center">
+                        <Grid Width="22" Height="22">
+                            <TextBlock FontFamily="Segoe MDL2 Assets"
+                                       Text="&#xE706;"
+                                       FontSize="16"
+                                       Foreground="{DynamicResource Brush.Text}"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       Visibility="{Binding ShowSunGlyph, Converter={StaticResource BoolToVisibility}}" />
+                            <TextBlock FontFamily="Segoe MDL2 Assets"
+                                       Text="&#xE708;"
+                                       FontSize="16"
+                                       Foreground="{DynamicResource Brush.Text}"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       Visibility="{Binding ShowMoonGlyph, Converter={StaticResource BoolToVisibility}}" />
+                        </Grid>
+                    </Button>
+                    <TextBlock VerticalAlignment="Center"
+                               Opacity="0.9"
+                               Text="{Binding StatusMessage}"
+                               TextWrapping="Wrap"
+                               MaxWidth="280" />
+                </StackPanel>
+                <StackPanel Grid.Row="1"
+                            Grid.Column="0"
+                            Grid.ColumnSpan="2"
+                            Margin="0,10,0,0"
                             HorizontalAlignment="Stretch">
                     <TextBlock FontSize="11"
                                Opacity="0.85"
@@ -112,7 +179,7 @@
                                        Foreground="{DynamicResource Brush.Text}"
                                        Text="{Binding HeaderClockText}" />
                         </StackPanel>
-                        <TextBlock Width="400"
+                        <TextBlock MaxWidth="900"
                                    HorizontalAlignment="Left"
                                    Margin="0,4,0,0"
                                    FontSize="10"
@@ -128,61 +195,35 @@
                                Visibility="{Binding ShowSunScheduleMessage, Converter={StaticResource BoolToVisibility}}"
                                Text="{Binding SunPhaseHint}" />
                 </StackPanel>
-                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                    <CheckBox Margin="0,0,12,0"
-                              VerticalAlignment="Center"
-                              Content="按日出/日落自动主题"
-                              IsChecked="{Binding UseSunAutoTheme, Mode=TwoWay}"
-                              IsEnabled="{Binding SunScheduleFeatureEnabled}" />
-                    <Button Command="{Binding ToggleThemeCommand}"
-                            ToolTip="{Binding ThemeToggleToolTip}"
-                            Padding="8,6"
-                            Margin="0,0,12,0"
-                            VerticalAlignment="Center">
-                        <Grid Width="22" Height="22">
-                            <TextBlock FontFamily="Segoe MDL2 Assets"
-                                       Text="&#xE706;"
-                                       FontSize="16"
-                                       Foreground="{DynamicResource Brush.Text}"
-                                       HorizontalAlignment="Center"
-                                       VerticalAlignment="Center"
-                                       Visibility="{Binding ShowSunGlyph, Converter={StaticResource BoolToVisibility}}" />
-                            <TextBlock FontFamily="Segoe MDL2 Assets"
-                                       Text="&#xE708;"
-                                       FontSize="16"
-                                       Foreground="{DynamicResource Brush.Text}"
-                                       HorizontalAlignment="Center"
-                                       VerticalAlignment="Center"
-                                       Visibility="{Binding ShowMoonGlyph, Converter={StaticResource BoolToVisibility}}" />
-                        </Grid>
-                    </Button>
-                    <TextBlock VerticalAlignment="Center"
-                               Opacity="0.9"
-                               Text="{Binding StatusMessage}"
-                               TextWrapping="Wrap"
-                               MaxWidth="320" />
-                </StackPanel>
             </Grid>
         </Border>
 
         <TabControl x:Name="MainTabControl">
             <TabItem Header="题库管理">
                 <DockPanel Margin="0,10,0,0">
-                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10">
-                        <Label Content="题型" VerticalAlignment="Center" />
-                        <ComboBox Width="120" ItemsSource="{Binding TypeFilterOptions}" SelectedItem="{Binding SelectedTypeFilter}" />
-                        <Label Margin="12,0,0,0" Content="难度" VerticalAlignment="Center" />
-                        <ComboBox Width="120" ItemsSource="{Binding DifficultyFilterOptions}" SelectedItem="{Binding SelectedDifficultyFilter}" />
-                        <Label Margin="12,0,0,0" Content="领域" VerticalAlignment="Center" />
-                        <ComboBox Width="150" ItemsSource="{Binding DomainFilterOptions}" SelectedItem="{Binding SelectedDomainFilter}" />
-                        <Button Content="刷新题库" Command="{Binding RefreshBankCommand}" />
-                        <Button Content="新建题目" Command="{Binding NewQuestionCommand}" />
-                        <Button Content="保存题目" Command="{Binding SaveQuestionCommand}" />
-                        <Button Content="删除题目" Command="{Binding DeleteQuestionCommand}" />
-                    </StackPanel>
+                    <ScrollViewer DockPanel.Dock="Top"
+                                  HorizontalScrollBarVisibility="Auto"
+                                  VerticalScrollBarVisibility="Disabled"
+                                  Margin="0,0,0,10"
+                                  MinHeight="40">
+                        <StackPanel Orientation="Horizontal">
+                            <Label Content="题型" VerticalAlignment="Center" />
+                            <ComboBox Width="120" ItemsSource="{Binding TypeFilterOptions}" SelectedItem="{Binding SelectedTypeFilter}" />
+                            <Label Margin="12,0,0,0" Content="难度" VerticalAlignment="Center" />
+                            <ComboBox Width="120" ItemsSource="{Binding DifficultyFilterOptions}" SelectedItem="{Binding SelectedDifficultyFilter}" />
+                            <Label Margin="12,0,0,0" Content="领域" VerticalAlignment="Center" />
+                            <ComboBox Width="150" ItemsSource="{Binding DomainFilterOptions}" SelectedItem="{Binding SelectedDomainFilter}" />
+                            <Button Margin="8,0,0,0" Content="刷新题库" Command="{Binding RefreshBankCommand}" />
+                            <Button Margin="8,0,0,0" Content="新建题目" Command="{Binding NewQuestionCommand}" />
+                            <Button Margin="8,0,0,0" Content="删除题目" Command="{Binding DeleteQuestionCommand}" />
+                        </StackPanel>
+                    </ScrollViewer>
 
                     <StackPanel DockPanel.Dock="Top" Margin="0,0,0,10">
-                        <WrapPanel Orientation="Horizontal">
+                        <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                                      VerticalScrollBarVisibility="Disabled"
+                                      MinHeight="44">
+                            <WrapPanel Orientation="Horizontal">
                             <Label Content="AI 模板" VerticalAlignment="Center" />
                             <ComboBox Width="150"
                                       Margin="6,0,12,0"
@@ -205,31 +246,57 @@
                                        Opacity="0.85"
                                        TextWrapping="Wrap"
                                        MaxWidth="420"
-                                       Text="领域取自上方「题目编辑器」中的领域；模板决定题型。模型须返回 JSON 数组（与导入格式一致）。" />
-                        </WrapPanel>
+                                       Text="领域、难度、题型与「刷新题库」左侧筛选一致（题型选「全部」时用「AI 模板」）；难度选「全部」时每批随机简单/中等/困难。与右侧编辑器无关。生成多题时自动分批请求并逐批入库，减轻超时。模型须返回 JSON 数组（与导入格式一致）。" />
+                            </WrapPanel>
+                        </ScrollViewer>
                         <Border Margin="0,8,0,0"
-                                Padding="8,6"
+                                Padding="12,10"
                                 CornerRadius="4"
                                 Background="{DynamicResource Brush.Surface}"
                                 BorderBrush="{DynamicResource Brush.Border}"
                                 BorderThickness="1"
                                 Visibility="{Binding IsBankAiGenerating, Converter={StaticResource BoolToVisibility}}">
                             <StackPanel>
-                                <TextBlock FontWeight="SemiBold"
-                                           Foreground="{DynamicResource Brush.Accent}"
-                                           Text="{Binding BankAiProgressPhase}" />
-                                <ProgressBar Height="6"
-                                             Margin="0,6,0,0"
-                                             IsIndeterminate="True"
+                                <DockPanel LastChildFill="False">
+                                    <Button DockPanel.Dock="Right"
+                                            Margin="8,0,0,0"
+                                            Padding="12,6"
+                                            VerticalAlignment="Top"
+                                            Content="取消请求"
+                                            Command="{Binding CancelActiveAiRequestCommand}" />
+                                    <TextBlock FontWeight="SemiBold"
+                                               Foreground="{DynamicResource Brush.Accent}"
+                                               Text="{Binding BankAiProgressPhase}"
+                                               TextWrapping="Wrap" />
+                                </DockPanel>
+                                <TextBlock Margin="0,8,0,0"
+                                           FontSize="13"
+                                           Text="{Binding BankAiProgressStatsLine}"
+                                           TextWrapping="Wrap" />
+                                <ProgressBar Height="10"
+                                             Margin="0,10,0,0"
+                                             Minimum="0"
+                                             Maximum="100"
+                                             Value="{Binding BankAiProgressPercent}"
                                              Foreground="{DynamicResource Brush.Accent}" />
+                                <TextBlock Margin="0,4,0,0"
+                                           FontSize="11"
+                                           Opacity="0.75"
+                                           Text="下方细条：当前批次正在请求模型…"
+                                           Visibility="{Binding BankAiBatchRequestActive, Converter={StaticResource BoolToVisibility}}" />
+                                <ProgressBar Height="4"
+                                             Margin="0,4,0,0"
+                                             Foreground="{DynamicResource Brush.Accent}"
+                                             IsIndeterminate="{Binding BankAiBatchRequestActive}"
+                                             Visibility="{Binding BankAiBatchRequestActive, Converter={StaticResource BoolToVisibility}}" />
                             </StackPanel>
                         </Border>
                     </StackPanel>
 
                     <Grid>
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="2*" />
-                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" MinWidth="200" />
+                            <ColumnDefinition Width="420" />
                         </Grid.ColumnDefinitions>
 
                         <DataGrid x:Name="BankQuestionsDataGrid"
@@ -241,6 +308,8 @@
                                   IsReadOnly="False"
                                   CanUserAddRows="False"
                                   CanUserDeleteRows="False"
+                                  HorizontalScrollBarVisibility="Auto"
+                                  VerticalScrollBarVisibility="Auto"
                                   CellEditEnding="BankQuestionsDataGrid_OnCellEditEnding">
                             <DataGrid.Columns>
                                 <DataGridTextColumn Header="Id"
@@ -259,13 +328,24 @@
                                                     Binding="{Binding TopicTags, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
                                                     Width="200"
                                                     IsReadOnly="False" />
+                                <DataGridTextColumn Header="选项（明细）"
+                                                    Binding="{Binding OptionsJson, Converter={StaticResource OptionsJsonDisplayConverter}}"
+                                                    Width="280"
+                                                    IsReadOnly="True">
+                                    <DataGridTextColumn.ElementStyle>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="TextWrapping" Value="Wrap" />
+                                        </Style>
+                                    </DataGridTextColumn.ElementStyle>
+                                </DataGridTextColumn>
                                 <DataGridTextColumn Header="标准答案"
                                                     Binding="{Binding StandardAnswer}"
                                                     Width="160"
                                                     IsReadOnly="True" />
                                 <DataGridTextColumn Header="题干"
                                                     Binding="{Binding Stem}"
-                                                    Width="*"
+                                                    Width="380"
+                                                    MinWidth="160"
                                                     IsReadOnly="True" />
                             </DataGrid.Columns>
                         </DataGrid>
@@ -288,16 +368,21 @@
                                 <StackPanel Grid.Column="1"
                                             Orientation="Horizontal"
                                             VerticalAlignment="Center">
+                                    <Button Margin="0,0,8,0"
+                                            MinWidth="100"
+                                            Padding="12,6"
+                                            Content="AI 出题"
+                                            ToolTip="仅在「新建题目」（左侧未选中题目）时可用。上方为进度与动画；成功后仅弹出简短提示，详情见 AI 日志。"
+                                            Command="{Binding FillEditorQuestionFromAiCommand}" />
                                     <CheckBox Margin="0,0,8,0"
                                               VerticalAlignment="Center"
                                               Content="提示词带标签"
                                               IsChecked="{Binding EditorAiSendTopicTagsToPrompt, Mode=TwoWay}"
                                               ToolTip="勾选时把下方「分类标签」「检索关键词」一并写入 AI 提示；不勾选则仅按领域、题型与难度出题，填入的标签以模型返回为准。" />
-                                    <Button MinWidth="100"
+                                    <Button MinWidth="88"
                                             Padding="12,6"
-                                            Content="AI 出题"
-                                            ToolTip="仅在「新建题目」（左侧未选中题目）时可用。上方为进度与动画；成功后仅弹出简短提示，详情见 AI 日志。"
-                                            Command="{Binding FillEditorQuestionFromAiCommand}" />
+                                            Content="保存题目"
+                                            Command="{Binding SaveQuestionCommand}" />
                                 </StackPanel>
                             </Grid>
                             <Border Grid.Row="1"
@@ -309,16 +394,29 @@
                                     BorderThickness="1"
                                     Visibility="{Binding IsEditorAiFillBusy, Converter={StaticResource BoolToVisibility}}">
                                 <StackPanel>
-                                    <TextBlock FontWeight="SemiBold"
-                                               Foreground="{DynamicResource Brush.Accent}"
-                                               Text="{Binding EditorAiProgressPhase}" />
+                                    <DockPanel LastChildFill="False">
+                                        <Button DockPanel.Dock="Right"
+                                                Margin="8,0,0,0"
+                                                Padding="12,6"
+                                                VerticalAlignment="Top"
+                                                Content="取消请求"
+                                                Command="{Binding CancelActiveAiRequestCommand}" />
+                                        <TextBlock FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource Brush.Accent}"
+                                                   Text="{Binding EditorAiProgressPhase}"
+                                                   TextWrapping="Wrap" />
+                                    </DockPanel>
                                     <ProgressBar Height="6"
                                                  Margin="0,6,0,0"
                                                  IsIndeterminate="True"
                                                  Foreground="{DynamicResource Brush.Accent}" />
                                 </StackPanel>
                             </Border>
-                            <StackPanel Grid.Row="2">
+                            <ScrollViewer Grid.Row="2"
+                                          VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled"
+                                          Padding="0,0,6,0">
+                            <StackPanel>
                             <Label Content="题型" />
                             <ComboBox ItemsSource="{Binding EditorTypeOptions}" SelectedItem="{Binding EditorType}" />
                             <Label Content="难度" />
@@ -327,10 +425,19 @@
                             <ComboBox ItemsSource="{Binding EditorDomainOptions}" SelectedItem="{Binding EditorDomain}" />
                             <Label Content="题干" />
                             <TextBox Height="90" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" Text="{Binding EditorStem, UpdateSourceTrigger=PropertyChanged}" />
-                            <Label Content="标准答案（填空题为正则表达式）" />
-                            <TextBox Text="{Binding EditorStandardAnswer, UpdateSourceTrigger=PropertyChanged}" />
-                            <Label Content="选项 JSON（客观题）" />
+                            <Label Content="选项 JSON（客观题选项列表）" />
                             <TextBox Height="70" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" Text="{Binding EditorOptionsJson, UpdateSourceTrigger=PropertyChanged}" />
+                            <Label FontWeight="SemiBold" Content="标准答案（可编辑）" />
+                            <TextBlock Margin="0,0,0,4"
+                                       FontSize="11"
+                                       Opacity="0.85"
+                                       TextWrapping="Wrap"
+                                       Text="单选填选项键如 A；多选如 A,C；判断填 对 或 错；简答填分号分隔关键词；填空题为判分用正则表达式。修改后请点击「保存题目」。" />
+                            <TextBox MinHeight="56"
+                                     TextWrapping="Wrap"
+                                     AcceptsReturn="True"
+                                     VerticalScrollBarVisibility="Auto"
+                                     Text="{Binding EditorStandardAnswer, UpdateSourceTrigger=PropertyChanged}" />
                             <Label Content="知识点标签" />
                             <TextBox Text="{Binding EditorKnowledgeTags, UpdateSourceTrigger=PropertyChanged}" />
                             <Label Content="分类标签（逗号分隔，用于推荐）" />
@@ -368,6 +475,7 @@
                             <Label Content="检索关键词（逗号/分号分隔）" />
                             <TextBox Text="{Binding EditorTopicKeywords, UpdateSourceTrigger=PropertyChanged}" />
                             </StackPanel>
+                            </ScrollViewer>
                         </Grid>
                     </Grid>
                 </DockPanel>
@@ -383,16 +491,20 @@
                             BorderThickness="1"
                             Margin="0,0,0,12">
                         <StackPanel>
+                            <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                                          VerticalScrollBarVisibility="Disabled"
+                                          MinHeight="44">
                             <WrapPanel ItemHeight="40">
                                 <Label Content="题量" VerticalAlignment="Center" />
-                                <TextBox Width="70" Text="{Binding ExamQuestionCount, UpdateSourceTrigger=PropertyChanged}" Height="32" />
+                                <TextBox Width="70" Height="32" VerticalAlignment="Center" Text="{Binding ExamQuestionCount, UpdateSourceTrigger=PropertyChanged}" />
                                 <Label Margin="12,0,0,0" Content="时长(分)" VerticalAlignment="Center" />
-                                <TextBox Width="70" Text="{Binding ExamMinutes, UpdateSourceTrigger=PropertyChanged}" Height="32" />
-                                <Button Content="随机组卷并开始" Command="{Binding StartExamCommand}" Width="140" Height="35" />
-                                <Button Content="交卷" Command="{Binding SubmitExamCommand}" Width="80" Height="35" />
-                                <Button Content="取消做题" Command="{Binding CancelExamCommand}" Width="80" Height="35" />
+                                <TextBox Width="70" Height="32" VerticalAlignment="Center" Text="{Binding ExamMinutes, UpdateSourceTrigger=PropertyChanged}" />
+                                <Button Margin="10,0,0,0" Content="随机组卷并开始" Command="{Binding StartExamCommand}" MinWidth="140" Height="35" Padding="12,6" />
+                                <Button Margin="8,0,0,0" Content="交卷" Command="{Binding SubmitExamCommand}" MinWidth="88" Height="35" Padding="12,6" />
+                                <Button Margin="8,0,0,0" Content="取消做题" Command="{Binding CancelExamCommand}" MinWidth="88" Height="35" Padding="12,6" />
                                 <TextBlock Margin="12,0,0,0" VerticalAlignment="Center" Text="{Binding LastScoreText, StringFormat=最近成绩：{0}}" />
                             </WrapPanel>
+                            </ScrollViewer>
                             <ItemsControl Margin="0,10,0,0" ItemsSource="{Binding ExamDomainPicks}">
                                 <ItemsControl.ItemsPanel>
                                     <ItemsPanelTemplate>
@@ -536,13 +648,34 @@
                                            Text="将本题与当前作答发送给模型，返回解析" />
                             </WrapPanel>
                             <GroupBox Header="AI 解析">
-                                <Grid MinHeight="90" MaxHeight="220">
-                                    <TextBox TextWrapping="Wrap"
+                                <Grid MinHeight="120" MaxHeight="260">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <StackPanel Grid.Row="0" Margin="0,0,0,6">
+                                        <TextBlock Text="【要点】"
+                                                   FontWeight="SemiBold"
+                                                   FontSize="12"
+                                                   Opacity="0.85" />
+                                        <TextBlock Text="{Binding ExamAiConclusionText, Mode=OneWay}"
+                                                   TextWrapping="Wrap"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource Brush.Accent}" />
+                                        <TextBlock Margin="0,8,0,0"
+                                                   Text="【详解】"
+                                                   FontWeight="SemiBold"
+                                                   FontSize="12"
+                                                   Opacity="0.85" />
+                                    </StackPanel>
+                                    <TextBox Grid.Row="1"
+                                             TextWrapping="Wrap"
                                              AcceptsReturn="True"
                                              VerticalScrollBarVisibility="Auto"
                                              Text="{Binding ExamAiExplanationText, Mode=OneWay}"
                                              IsReadOnly="True" />
-                                    <Border Background="{DynamicResource Brush.OverlayScrim}"
+                                    <Border Grid.RowSpan="2"
+                                            Background="{DynamicResource Brush.OverlayScrim}"
                                             Visibility="{Binding IsExamAiExplainBusy, Converter={StaticResource BoolToVisibility}}">
                                         <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Margin="20">
                                             <TextBlock Text="正在请求 AI…"
@@ -554,6 +687,11 @@
                                                          Width="200"
                                                          Margin="0,14,0,0"
                                                          BorderThickness="0" />
+                                            <Button Margin="0,16,0,0"
+                                                    Padding="16,8"
+                                                    HorizontalAlignment="Center"
+                                                    Content="取消请求"
+                                                    Command="{Binding CancelActiveAiRequestCommand}" />
                                         </StackPanel>
                                     </Border>
                                 </Grid>
@@ -582,13 +720,13 @@
                                         Command="{Binding RefreshWrongBookCommand}"
                                         Margin="0,0,10,0"
                                         MinHeight="38"
-                                        MinWidth="100"
+                                        MinWidth="150"
                                         Padding="14,10" />
                                 <Button Content="错题再练（组卷）"
                                         Command="{Binding StartWrongBookPracticeCommand}"
                                         Margin="0,0,10,0"
                                         MinHeight="38"
-                                        MinWidth="120"
+                                        MinWidth="150"
                                         Padding="14,10" />
                                 <Button Content="AI 错题解析（已勾选）"
                                         Command="{Binding AiTutorAnalyzeWrongCommand}"
@@ -600,12 +738,13 @@
                                         Command="{Binding RecommendCommand}"
                                         Margin="0,0,10,0"
                                         MinHeight="38"
-                                        MinWidth="100"
+                                        MinWidth="150"
                                         Padding="14,10" />
                                 <Button Content="用推荐题开始考试"
                                         Command="{Binding StartExamFromRecommendationCommand}"
+                                        Margin="0,0,10,0"
                                         MinHeight="38"
-                                        MinWidth="132"
+                                        MinWidth="150"
                                         Padding="14,10" />
                             </StackPanel>
                         </ScrollViewer>
@@ -701,13 +840,11 @@
                                         </DataGridTemplateColumn.Header>
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate DataType="{x:Type vm:WrongBookRowVm}">
-                                                <ScrollViewer MaxHeight="96"
-                                                              VerticalScrollBarVisibility="Auto"
-                                                              HorizontalScrollBarVisibility="Disabled">
-                                                    <TextBlock Text="{Binding DomainDisplay}"
-                                                               TextWrapping="Wrap"
-                                                               Width="80" />
-                                                </ScrollViewer>
+                                                <TextBlock Text="{Binding DomainDisplay}"
+                                                           TextWrapping="Wrap"
+                                                           Width="80"
+                                                           MaxHeight="96"
+                                                           ToolTip="{Binding DomainDisplay}" />
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
@@ -720,13 +857,11 @@
                                         </DataGridTemplateColumn.Header>
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate DataType="{x:Type vm:WrongBookRowVm}">
-                                                <ScrollViewer MaxHeight="96"
-                                                              VerticalScrollBarVisibility="Auto"
-                                                              HorizontalScrollBarVisibility="Disabled">
-                                                    <TextBlock Text="{Binding TypeDisplay}"
-                                                               TextWrapping="Wrap"
-                                                               Width="68" />
-                                                </ScrollViewer>
+                                                <TextBlock Text="{Binding TypeDisplay}"
+                                                           TextWrapping="Wrap"
+                                                           Width="68"
+                                                           MaxHeight="96"
+                                                           ToolTip="{Binding TypeDisplay}" />
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
@@ -739,13 +874,28 @@
                                         </DataGridTemplateColumn.Header>
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate DataType="{x:Type vm:WrongBookRowVm}">
-                                                <ScrollViewer MaxHeight="96"
-                                                              VerticalScrollBarVisibility="Auto"
-                                                              HorizontalScrollBarVisibility="Disabled">
-                                                    <TextBlock Text="{Binding Stem}"
-                                                               TextWrapping="Wrap"
-                                                               Width="200" />
-                                                </ScrollViewer>
+                                                <TextBlock Text="{Binding Stem}"
+                                                           TextWrapping="Wrap"
+                                                           Width="200"
+                                                           MaxHeight="120"
+                                                           ToolTip="{Binding Stem}" />
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTemplateColumn Width="280" MinWidth="220" MaxWidth="400">
+                                        <DataGridTemplateColumn.Header>
+                                            <TextBlock Width="240"
+                                                       Text="选项（明细）"
+                                                       TextAlignment="Center"
+                                                       TextWrapping="Wrap" />
+                                        </DataGridTemplateColumn.Header>
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate DataType="{x:Type vm:WrongBookRowVm}">
+                                                <TextBlock Text="{Binding OptionsDisplay}"
+                                                           TextWrapping="Wrap"
+                                                           Width="260"
+                                                           MaxHeight="140"
+                                                           ToolTip="{Binding OptionsDisplay}" />
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
@@ -758,13 +908,11 @@
                                         </DataGridTemplateColumn.Header>
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate DataType="{x:Type vm:WrongBookRowVm}">
-                                                <ScrollViewer MaxHeight="96"
-                                                              VerticalScrollBarVisibility="Auto"
-                                                              HorizontalScrollBarVisibility="Disabled">
-                                                    <TextBlock Text="{Binding WrongAnswerDisplay}"
-                                                               TextWrapping="Wrap"
-                                                               Width="150" />
-                                                </ScrollViewer>
+                                                <TextBlock Text="{Binding WrongAnswerDisplay}"
+                                                           TextWrapping="Wrap"
+                                                           Width="150"
+                                                           MaxHeight="120"
+                                                           ToolTip="{Binding WrongAnswerDisplay}" />
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
@@ -777,13 +925,11 @@
                                         </DataGridTemplateColumn.Header>
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate DataType="{x:Type vm:WrongBookRowVm}">
-                                                <ScrollViewer MaxHeight="96"
-                                                              VerticalScrollBarVisibility="Auto"
-                                                              HorizontalScrollBarVisibility="Disabled">
-                                                    <TextBlock Text="{Binding StandardAnswerDisplay}"
-                                                               TextWrapping="Wrap"
-                                                               Width="132" />
-                                                </ScrollViewer>
+                                                <TextBlock Text="{Binding StandardAnswerDisplay}"
+                                                           TextWrapping="Wrap"
+                                                           Width="132"
+                                                           MaxHeight="120"
+                                                           ToolTip="{Binding StandardAnswerDisplay}" />
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
@@ -811,13 +957,11 @@
                                         </DataGridTemplateColumn.Header>
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate DataType="{x:Type vm:WrongBookRowVm}">
-                                                <ScrollViewer MaxHeight="96"
-                                                              VerticalScrollBarVisibility="Auto"
-                                                              HorizontalScrollBarVisibility="Disabled">
-                                                    <TextBlock Text="{Binding LastWrongAtDisplay}"
-                                                               TextWrapping="Wrap"
-                                                               Width="118" />
-                                                </ScrollViewer>
+                                                <TextBlock Text="{Binding LastWrongAtDisplay}"
+                                                           TextWrapping="Wrap"
+                                                           Width="118"
+                                                           MaxHeight="96"
+                                                           ToolTip="{Binding LastWrongAtDisplay}" />
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
@@ -884,6 +1028,11 @@
                                                      Height="8"
                                                      Margin="0,18,0,0"
                                                      BorderThickness="0" />
+                                        <Button Margin="0,16,0,0"
+                                                Padding="16,8"
+                                                HorizontalAlignment="Center"
+                                                Content="取消请求"
+                                                Command="{Binding CancelActiveAiRequestCommand}" />
                                     </StackPanel>
                                 </Border>
                             </Grid>
@@ -920,6 +1069,11 @@
                                              Height="8"
                                              Margin="0,18,0,0"
                                              BorderThickness="0" />
+                                <Button Margin="0,16,0,0"
+                                        Padding="16,8"
+                                        HorizontalAlignment="Center"
+                                        Content="取消请求"
+                                        Command="{Binding CancelActiveAiRequestCommand}" />
                             </StackPanel>
                         </Border>
                     </Grid>

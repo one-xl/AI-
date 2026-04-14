@@ -34,27 +34,24 @@ public sealed class ArkChatCompletionClient : IChatCompletionService
         };
         _logger = logger;
 
-        var baseUrl = ArkApiEndpointNormalizer.ToChatCompletionsBaseUrl(config.BaseUrl);
-        _httpClient.BaseAddress = new Uri(baseUrl);
-        _httpClient.Timeout = config.Timeout;
-        _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", config.ApiKey);
-        _httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-
-        _logger.LogInformation("ArkChatCompletionClient 就绪：BaseUrl={BaseUrl}, Model={Model}", baseUrl, config.ModelName);
+        _httpClient.Timeout = TimeSpan.FromMinutes(5);
+        _logger.LogInformation("ArkChatCompletionClient 已注册：按请求使用当前模型档案（可切换）。");
     }
 
     /// <inheritdoc />
     public async Task<ChatCompletionResponse> GenerateCompletionAsync(
         IList<ChatMessage> messages,
         IList<ToolDefinition>? tools = null,
+        int? maxTokens = null,
         CancellationToken cancellationToken = default)
     {
+        var snap = _config.GetConnectionSnapshot();
         var request = new
         {
-            model = _config.ModelName,
+            model = snap.ModelName,
             messages,
-            temperature = _config.Temperature,
-            max_tokens = _config.MaxTokens
+            temperature = snap.Temperature,
+            max_tokens = maxTokens ?? snap.MaxTokens
         };
 
         var requestContent = new StringContent(
@@ -62,11 +59,14 @@ public sealed class ArkChatCompletionClient : IChatCompletionService
             Encoding.UTF8,
             "application/json");
 
-        var requestUri = new Uri(_httpClient.BaseAddress!, "chat/completions");
-        _logger.LogInformation("Ark 请求 POST {RequestUri}，model={Model}", requestUri, _config.ModelName);
+        var endpoint = BuildChatCompletionsUri(snap.BaseUrl);
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = requestContent };
+        ApplyAuthAndAccept(httpRequest, snap);
+
+        _logger.LogInformation("Ark 请求 POST {RequestUri}，profile={Profile} model={Model}", endpoint, _config.ActiveProfileId, snap.ModelName);
 
         using var response = await _httpClient
-            .PostAsync("chat/completions", requestContent, cancellationToken)
+            .SendAsync(httpRequest, cancellationToken)
             .ConfigureAwait(false);
 
         var traceHeaders = TryGetTraceHeaders(response);
@@ -99,14 +99,16 @@ public sealed class ArkChatCompletionClient : IChatCompletionService
     public async IAsyncEnumerable<ChatCompletionStreamResponse> GenerateCompletionStreamAsync(
         IList<ChatMessage> messages,
         IList<ToolDefinition>? tools = null,
+        int? maxTokens = null,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        var snap = _config.GetConnectionSnapshot();
         var request = new
         {
-            model = _config.ModelName,
+            model = snap.ModelName,
             messages,
-            temperature = _config.Temperature,
-            max_tokens = _config.MaxTokens,
+            temperature = snap.Temperature,
+            max_tokens = maxTokens ?? snap.MaxTokens,
             stream = true
         };
 
@@ -115,7 +117,10 @@ public sealed class ArkChatCompletionClient : IChatCompletionService
             Encoding.UTF8,
             "application/json");
 
-        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, "chat/completions") { Content = requestContent };
+        var endpoint = BuildChatCompletionsUri(snap.BaseUrl);
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = requestContent };
+        ApplyAuthAndAccept(httpRequest, snap);
+
         using var response = await _httpClient
             .SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
             .ConfigureAwait(false);
@@ -153,6 +158,25 @@ public sealed class ArkChatCompletionClient : IChatCompletionService
             if (chunk != null)
                 yield return chunk;
         }
+    }
+
+    private static Uri BuildChatCompletionsUri(string baseUrl)
+    {
+        var normalized = ArkApiEndpointNormalizer.ToChatCompletionsBaseUrl(baseUrl).TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            throw new InvalidOperationException(
+                "方舟 BaseUrl 未配置。请在 appsettings.json、用户机密或「模型档案」中填写控制台给出的 OpenAI 兼容 API 根路径（通常以 /api/v3/ 结尾）。");
+        }
+
+        return new Uri($"{normalized}/chat/completions");
+    }
+
+    private static void ApplyAuthAndAccept(HttpRequestMessage httpRequest, DoubaoConnectionSnapshot snap)
+    {
+        httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", snap.ApiKey);
+        httpRequest.Headers.Accept.Clear();
+        httpRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
     }
 
     /// <summary>

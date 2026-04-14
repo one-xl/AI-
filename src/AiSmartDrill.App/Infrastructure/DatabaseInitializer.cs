@@ -1,4 +1,3 @@
-using System.IO;
 using AiSmartDrill.App.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -6,7 +5,7 @@ using Microsoft.Extensions.Logging;
 namespace AiSmartDrill.App.Infrastructure;
 
 /// <summary>
-/// 负责数据库创建与演示种子数据初始化，保证首次启动即可完整演示核心流程。
+/// 负责数据库创建与演示种子数据初始化：仅在首次创建库文件时写入种子，不在每次启动时删除已有 SQLite，以免用户与 AI 新增题目丢失。
 /// </summary>
 public sealed class DatabaseInitializer
 {
@@ -38,34 +37,19 @@ public sealed class DatabaseInitializer
     {
         try
         {
-            // 先尝试删除旧数据库（在创建上下文之前）
-            // 这样可以避免数据库文件被锁定的问题
-            string? dbPath = null;
-            await using (var tempDb = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false))
-            {
-                dbPath = tempDb.Database.GetDbConnection().DataSource;
-            }
-
-            if (!string.IsNullOrEmpty(dbPath) && File.Exists(dbPath))
-            {
-                try
-                {
-                    File.Delete(dbPath);
-                    _logger.LogInformation("已删除旧数据库文件：{DbPath}", dbPath);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "删除旧数据库文件失败，尝试继续...");
-                }
-            }
-
-            // 现在创建新的数据库
             await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
             // 演示环境：使用 EnsureCreated 避免引入迁移复杂度；生产环境应改用 Migrate。
-            await db.Database.EnsureCreatedAsync(cancellationToken).ConfigureAwait(false);
+            // 若库文件已存在，返回 false，不得再次灌入种子，否则会与已有主键/数据冲突且会掩盖用户题库。
+            var created = await db.Database.EnsureCreatedAsync(cancellationToken).ConfigureAwait(false);
 
-            _logger.LogInformation("写入演示种子数据...");
+            if (!created)
+            {
+                _logger.LogInformation("数据库已存在，跳过演示种子初始化（保留题库、答题与错题等数据）。");
+                return;
+            }
+
+            _logger.LogInformation("新建数据库，写入演示种子数据...");
 
             var demoUser = new AppUser
             {

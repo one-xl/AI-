@@ -38,6 +38,10 @@ public sealed class ApiStudyPlanService : IStudyPlanService
             _trace.Set("plan:ark", true);
             return plan;
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Ark 学习计划失败，回退本地");
@@ -56,7 +60,7 @@ public sealed class ApiStudyPlanService : IStudyPlanService
             {
                 Role = "system",
                 Content =
-                    "你是学习规划助手。只输出一个 JSON 对象，不要 Markdown，不要解释。字段：Title(string)、DailyQuestionQuota(number)、FocusKnowledgeTags(string[])、PhaseDays(number)、Notes(string)。"
+                    "你是学习规划助手。只输出一个 JSON 对象，不要 Markdown，不要解释。字段：Title(string)、DailyQuestionQuota(number)、FocusKnowledgeTags(string[])、PhaseDays(number)、Notes(string)。Notes 不超过 60 字。"
             },
             new ChatMessage
             {
@@ -66,7 +70,9 @@ public sealed class ApiStudyPlanService : IStudyPlanService
             }
         };
 
-        var response = await _chat.GenerateCompletionAsync(messages, null, cancellationToken).ConfigureAwait(false);
+        var response = await _chat
+            .GenerateCompletionAsync(messages, null, AiCompletionTokenBudgets.StudyPlanJson, cancellationToken)
+            .ConfigureAwait(false);
         var raw = ArkAssistantReply.GetPrimaryText(response);
         var json = ArkModelOutputParsing.ExtractFirstJsonValue(raw);
         if (string.IsNullOrWhiteSpace(json))

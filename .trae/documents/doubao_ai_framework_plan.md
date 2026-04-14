@@ -52,7 +52,7 @@ graph TD
 2. **配置参数**
    - API 密钥：从 appsettings.json 读取
    - 模型名称：支持 doubao-seed-1.8 等模型
-   - 基础 URL：`https://ark.cn-beijing.volces.com/api/v3`
+   - 基础 URL：由控制台 OpenAI 兼容接口文档提供（根路径到 `/api/v3`）
    - 超时设置：默认 30 秒
    - 最大重试次数：默认 3 次
    - 支持思考能力（thinking）和视觉能力（vision）

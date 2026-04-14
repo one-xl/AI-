@@ -110,6 +110,10 @@ public sealed class ApiQuestionRecommendationService : IQuestionRecommendationSe
             _logger.LogInformation("AI 题目推荐（Ark）：UserId={UserId}, Count={Count}", userId, dto.RecommendedQuestionIds.Count);
             return dto;
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Ark 题目推荐失败，回退本地");
@@ -222,7 +226,7 @@ public sealed class ApiQuestionRecommendationService : IQuestionRecommendationSe
                 Role = "system",
                 Content =
                     "你是教育场景助手。只输出一个 JSON 对象，不要 Markdown，不要解释文字。\n" +
-                    "字段：Rationale(string)、FocusTags(string[])、FocusKeywords(string[])、RecommendedQuestionIds(number[])。\n" +
+                    "字段：Rationale(string)、FocusTags(string[])、FocusKeywords(string[])、RecommendedQuestionIds(number[])。Rationale 一句话，不超过 40 字。\n" +
                     "FocusTags 与 FocusKeywords 由你根据错题上下文与弱项推断，用于后续在题库中筛选：标签应贴近 TopicTags/KnowledgeTags 中的词汇；关键词应可命中题干或 TopicKeywords。\n" +
                     "RecommendedQuestionIds 须恰好 " + TargetCount + " 个，且每个 Id 必须出现在用户给出的候选表中；不得包含错题上下文中列出的 Id 或「勿推荐」列表中的 Id。\n" +
                     "若领域已限定，只推荐该 Domain 的题。"
@@ -238,7 +242,9 @@ public sealed class ApiQuestionRecommendationService : IQuestionRecommendationSe
             }
         };
 
-        var response = await _chat.GenerateCompletionAsync(messages, null, cancellationToken).ConfigureAwait(false);
+        var response = await _chat
+            .GenerateCompletionAsync(messages, null, AiCompletionTokenBudgets.RecommendationJson, cancellationToken)
+            .ConfigureAwait(false);
         var raw = ArkAssistantReply.GetPrimaryText(response);
         var json = ArkModelOutputParsing.ExtractFirstJsonValue(raw);
         if (string.IsNullOrWhiteSpace(json))

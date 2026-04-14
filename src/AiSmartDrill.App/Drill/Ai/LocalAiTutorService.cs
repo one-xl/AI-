@@ -54,10 +54,14 @@ public sealed class LocalAiTutorService : IAiTutorService
                     QuestionId = item.QuestionId,
                     Type = item.Type,
                     StemSummary = item.StemSummary,
+                    StemFull = item.StemFull,
+                    OptionsJson = item.OptionsJson,
+                    KnowledgeTags = item.KnowledgeTags,
                     UserAnswer = item.UserAnswer,
                     StandardAnswer = item.StandardAnswer,
                     RootCause = root,
-                    SolutionHints = hints
+                    SolutionHints = hints,
+                    OptionAnalysis = WrongQuestionInsightTextFallback.BuildOptionAnalysis(item)
                 };
             })
             .ToList()

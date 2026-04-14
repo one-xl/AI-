@@ -42,6 +42,10 @@ public sealed class ApiAiTutorService : IAiTutorService
         {
             return await AnalyzeBatchWithArkAsync(wrongItems, cancellationToken).ConfigureAwait(false);
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Ark 错题解析失败，回退本地模板");
@@ -60,6 +64,9 @@ public sealed class ApiAiTutorService : IAiTutorService
                 w.QuestionId,
                 Type = w.Type.ToString(),
                 w.StemSummary,
+                StemFull = string.IsNullOrWhiteSpace(w.StemFull) ? w.StemSummary : w.StemFull,
+                w.OptionsJson,
+                w.KnowledgeTags,
                 w.UserAnswer,
                 w.StandardAnswer
             })
@@ -74,17 +81,28 @@ public sealed class ApiAiTutorService : IAiTutorService
                 Role = "system",
                 Content =
                     "你是专业教学助手。必须只输出一个 JSON 数组，不要 Markdown 围栏，不要任何说明文字。" +
-                    "数组每一项对象字段：QuestionId(number)、RootCause(string)、SolutionHints(string)。" +
-                    "须覆盖输入中的全部 QuestionId。"
+                    "数组每一项对象字段：QuestionId(number)、RootCause(string)、SolutionHints(string)、OptionAnalysis(string)。" +
+                    "须覆盖输入中的全部 QuestionId；按输入 Type 决定详略，禁止对所有题型一刀切短写。\n" +
+                    "【RootCause】2～4 句中文：考查点 + 对照用户作答与标准答案的具体错因；禁止空泛套话单独成段。\n" +
+                    "【SolutionHints】3～5 条短句：可操作的改正步骤（审题、关键定义/公式、易错点、自检）。\n" +
+                    "【OptionAnalysis】须与 Type、OptionsJson、UserAnswer、StandardAnswer 一致：\n" +
+                    "- 若 Type 为 SingleChoice 或 MultipleChoice，且 OptionsJson 为合法 JSON 字符串数组（至少 2 项）：**逐选项写细解析**。" +
+                    "按 A、B、C… 与数组顺序一一对应；每个选项单独一小段，段首写「A:」「B:」等，**每选项 2～4 句**：选项文字本身对错、与题干条件/知识点的关系、常见误选原因；" +
+                    "若该选项是标答组成部分或用户误选/漏选，必须点明；**所有选项写完后**另起一段「小结：」用 2～3 句汇总标答、用户作答、错因（错选/漏选/多选哪些字母）。\n" +
+                    "- 若为 TrueFalse：共 4～8 句即可，直接写对错判定依据、关键定义边界、用户错因，不要虚构 A/B 选项段。\n" +
+                    "- 若为 ShortAnswer、FillInBlank，或 OptionsJson 为空/非选项数组：共 5～10 句**直接解析**，写清得分关键词或正则判分要点、用户答案偏差、应如何改写成可得分表述；不要逐字母选项。\n" +
+                    "解析一律以 StemFull 为准，StemSummary 仅作参考。"
             },
             new ChatMessage
             {
                 Role = "user",
-                Content = "错题列表（JSON）：\n" + payloadJson
+                Content = "错题列表（JSON，含完整题干 StemFull 与 OptionsJson）：\n" + payloadJson
             }
         };
 
-        var response = await _chat.GenerateCompletionAsync(messages, null, cancellationToken).ConfigureAwait(false);
+        var response = await _chat
+            .GenerateCompletionAsync(messages, null, AiCompletionTokenBudgets.TutorWrongBatch(wrongItems.Count), cancellationToken)
+            .ConfigureAwait(false);
         var raw = ArkAssistantReply.GetPrimaryText(response);
         var json = ArkModelOutputParsing.ExtractFirstJsonValue(raw);
         if (string.IsNullOrWhiteSpace(json))
@@ -101,15 +119,22 @@ public sealed class ApiAiTutorService : IAiTutorService
         {
             if (byId.TryGetValue(item.QuestionId, out var ai))
             {
+                var opt = string.IsNullOrWhiteSpace(ai.OptionAnalysis)
+                    ? WrongQuestionInsightTextFallback.BuildOptionAnalysis(item)
+                    : ai.OptionAnalysis!.Trim();
                 results.Add(new WrongQuestionInsightDto
                 {
                     QuestionId = item.QuestionId,
                     Type = item.Type,
                     StemSummary = item.StemSummary,
+                    StemFull = item.StemFull,
+                    OptionsJson = item.OptionsJson,
+                    KnowledgeTags = item.KnowledgeTags,
                     UserAnswer = item.UserAnswer,
                     StandardAnswer = item.StandardAnswer,
                     RootCause = string.IsNullOrWhiteSpace(ai.RootCause) ? "（未给出原因）" : ai.RootCause!,
-                    SolutionHints = string.IsNullOrWhiteSpace(ai.SolutionHints) ? "（未给出思路）" : ai.SolutionHints!
+                    SolutionHints = string.IsNullOrWhiteSpace(ai.SolutionHints) ? "（未给出思路）" : ai.SolutionHints!,
+                    OptionAnalysis = opt
                 });
             }
             else
@@ -154,10 +179,14 @@ public sealed class ApiAiTutorService : IAiTutorService
             QuestionId = item.QuestionId,
             Type = item.Type,
             StemSummary = item.StemSummary,
+            StemFull = item.StemFull,
+            OptionsJson = item.OptionsJson,
+            KnowledgeTags = item.KnowledgeTags,
             UserAnswer = item.UserAnswer,
             StandardAnswer = item.StandardAnswer,
             RootCause = prefix + root,
-            SolutionHints = hints
+            SolutionHints = hints,
+            OptionAnalysis = WrongQuestionInsightTextFallback.BuildOptionAnalysis(item)
         };
     }
 
@@ -171,5 +200,6 @@ public sealed class ApiAiTutorService : IAiTutorService
         public long QuestionId { get; set; }
         public string? RootCause { get; set; }
         public string? SolutionHints { get; set; }
+        public string? OptionAnalysis { get; set; }
     }
 }

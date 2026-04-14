@@ -1,3 +1,4 @@
+using AiSmartDrill.App;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace AiSmartDrill.App.ViewModels;
@@ -19,6 +20,7 @@ public partial class WrongBookRowVm : ObservableObject
         string domainDisplay,
         string typeDisplay,
         string stem,
+        string? optionsJson,
         string wrongAnswerDisplay,
         string standardAnswerDisplay,
         int wrongCount,
@@ -31,6 +33,7 @@ public partial class WrongBookRowVm : ObservableObject
         DomainDisplay = domainDisplay;
         TypeDisplay = typeDisplay;
         Stem = stem;
+        OptionsDisplay = QuestionOptionsDisplayFormatter.FormatForDisplay(optionsJson);
         WrongAnswerDisplay = wrongAnswerDisplay;
         StandardAnswerDisplay = standardAnswerDisplay;
         WrongCount = wrongCount;
@@ -69,6 +72,11 @@ public partial class WrongBookRowVm : ObservableObject
     /// 题干全文。
     /// </summary>
     public string Stem { get; }
+
+    /// <summary>
+    /// 客观题选项全文（由 <c>OptionsJson</c> 展开为多行 A/B/C…）。
+    /// </summary>
+    public string OptionsDisplay { get; }
 
     /// <summary>
     /// 最近一次错误作答展示文本。

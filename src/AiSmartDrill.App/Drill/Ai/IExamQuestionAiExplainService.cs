@@ -13,8 +13,8 @@ public interface IExamQuestionAiExplainService
     /// <param name="question">当前题库题目实体。</param>
     /// <param name="userAnswerSnapshot">用户当前输入或按钮选择快照。</param>
     /// <param name="cancellationToken">取消标记。</param>
-    /// <returns>模型输出的解析正文（已去除常见围栏）。</returns>
-    Task<string> ExplainQuestionAsync(
+    /// <returns>结论与详解两段（模型须按提示先写【结论】再写【详解】）。</returns>
+    Task<ExamQuestionExplainResult> ExplainQuestionAsync(
         Question question,
         string? userAnswerSnapshot,
         CancellationToken cancellationToken = default);

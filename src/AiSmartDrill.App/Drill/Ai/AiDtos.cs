@@ -1,4 +1,7 @@
+using System.Text;
+using System.Text.Json;
 using AiSmartDrill.App.Domain;
+using AiSmartDrill.App.Drill.Ai.Ark;
 
 namespace AiSmartDrill.App.Drill.Ai;
 
@@ -18,9 +21,24 @@ public sealed class WrongQuestionInsightDto
     public QuestionType Type { get; init; }
 
     /// <summary>
-    /// 获取或设置题干摘要（可截断）。
+    /// 获取或设置题干摘要（可截断，用于列表等）。
     /// </summary>
     public string StemSummary { get; init; } = string.Empty;
+
+    /// <summary>
+    /// 获取或设置完整题干；发送给模型时优先于此，避免摘要截断导致解析笼统。
+    /// </summary>
+    public string StemFull { get; init; } = string.Empty;
+
+    /// <summary>
+    /// 获取或设置客观题选项 JSON（字符串数组）；简答/填空等可为 null。
+    /// </summary>
+    public string? OptionsJson { get; init; }
+
+    /// <summary>
+    /// 获取或设置知识点标签（逗号分隔），辅助模型定位考点。
+    /// </summary>
+    public string? KnowledgeTags { get; init; }
 
     /// <summary>
     /// 获取或设置用户作答。
@@ -41,6 +59,101 @@ public sealed class WrongQuestionInsightDto
     /// 获取或设置解题思路（分步建议）。
     /// </summary>
     public string SolutionHints { get; init; } = string.Empty;
+
+    /// <summary>
+    /// 获取或设置逐选项辨析：对单选/多选等须说明各选项正误与技术理由；无选项题型则说明得分点与表述要求。
+    /// </summary>
+    public string OptionAnalysis { get; init; } = string.Empty;
+}
+
+/// <summary>
+/// 在 Ark 不可用或模型漏字段时，为错题解析拼装简短的逐选项/逐要点对照文案。
+/// </summary>
+public static class WrongQuestionInsightTextFallback
+{
+    /// <summary>
+    /// 根据题型、选项 JSON 与用户/标准答案生成回退用的「选项辨析」段落。
+    /// </summary>
+    public static string BuildOptionAnalysis(WrongQuestionInsightDto item)
+    {
+        if (item.Type == QuestionType.TrueFalse)
+        {
+            return
+                $"本题为判断题：标准结论为「{item.StandardAnswer}」，你的作答为「{item.UserAnswer}」。请回到教材或定义中的判定条件，逐条核对命题是否成立，避免绝对化表述误判。";
+        }
+
+        if (item.Type is QuestionType.ShortAnswer or QuestionType.FillInBlank)
+        {
+            return
+                $"本题无 A/B 类独立选项。请对照标准答案「{item.StandardAnswer}」：简答题抓关键词与要点顺序；填空题若标答为正则式，请检查你的表述是否命中得分模式。";
+        }
+
+        if (string.IsNullOrWhiteSpace(item.OptionsJson))
+        {
+            return "本题未附带选项文本 JSON。请仍将你的作答与标准答案逐项对齐，并回忆相关概念定义。";
+        }
+
+        try
+        {
+            var arr = JsonSerializer.Deserialize<List<string>>(item.OptionsJson, ArkChatJsonDefaults.ModelPayloadOptions);
+            if (arr is null || arr.Count == 0)
+            {
+                return "选项 JSON 无法解析为列表，请直接对照标准答案与知识点复盘。";
+            }
+
+            var correct = ParseChoiceKeys(item.StandardAnswer);
+            var user = ParseChoiceKeys(item.UserAnswer);
+            var sb = new StringBuilder();
+            sb.AppendLine("（以下为本地回退简要对照；联网解析会给出更细的辨析。）");
+            for (var i = 0; i < arr.Count && i < 26; i++)
+            {
+                var key = ((char)('A' + i)).ToString();
+                var inStd = correct.Contains(key);
+                var picked = user.Contains(key);
+                var body = arr[i].Trim();
+                if (body.Length > 56)
+                {
+                    body = body[..56] + "…";
+                }
+
+                var role = inStd ? "属于标准答案" : "不属于标准答案";
+                var pick = picked ? "你已选" : "你未选";
+                sb.AppendLine($"{key}. {body} — {role}；{pick}。");
+            }
+
+            return sb.ToString().TrimEnd();
+        }
+        catch (JsonException)
+        {
+            return "选项 JSON 解析失败，请对照标准答案手动复盘各选项。";
+        }
+    }
+
+    private static HashSet<string> ParseChoiceKeys(string? raw)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return set;
+        }
+
+        foreach (var p in raw.Split(new[] { ',', '，', ';', '；', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (p.Length == 1 && char.IsLetter(p[0]))
+            {
+                set.Add(char.ToUpperInvariant(p[0]).ToString());
+            }
+            else
+            {
+                foreach (var c in p.Where(static ch => char.IsLetter(ch)))
+                {
+                    set.Add(char.ToUpperInvariant(c).ToString());
+                }
+            }
+        }
+
+        return set;
+    }
 }
 
 /// <summary>

@@ -9,6 +9,7 @@ using System.Windows.Threading;
 using AiSmartDrill.App;
 using Microsoft.Win32;
 using AiSmartDrill.App.Drill.Ai;
+using AiSmartDrill.App.Drill.Ai.Config;
 using AiSmartDrill.App.Drill.Grading;
 using AiSmartDrill.App.Drill.Import;
 using AiSmartDrill.App.Domain;
@@ -41,6 +42,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly AiCallTrace _aiTrace;
     private readonly ILogger<MainWindowViewModel> _logger;
     private readonly IConfiguration _configuration;
+    private readonly DoubaoModelConfig _doubaoModelConfig;
 
     /// <summary>
     /// 考试计时器：每秒递减剩余秒数；到达 0 时自动交卷。
@@ -73,6 +75,13 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     private int _submitGate;
 
     /// <summary>
+    /// 保护 <see cref="_aiRequestCts"/> 的分配与取消，供「取消 AI 请求」与并发 Ark 调用协调。
+    /// </summary>
+    private readonly object _aiRequestLock = new();
+
+    private CancellationTokenSource? _aiRequestCts;
+
+    /// <summary>
     /// 最近一次交卷产生的错题上下文（供展示与兼容；AI 解析以错题本勾选题为准）。
     /// </summary>
     private List<WrongQuestionInsightDto> _pendingWrongInsightsForAi = new();
@@ -93,6 +102,16 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     private DateTime _questionStartedAtUtc = DateTime.UtcNow;
 
     /// <summary>
+    /// 单次调用大模型时的出题数量上限（须低于服务内硬上限），减小单次 JSON 体积与超时风险。
+    /// </summary>
+    private const int BankAiGenerationChunkSize = 6;
+
+    /// <summary>
+    /// 多批次合计生成题量上限，防止误输入导致长时间占用。
+    /// </summary>
+    private const int BankAiGenerationMaxTotal = 96;
+
+    /// <summary>
     /// 初始化 <see cref="MainWindowViewModel"/> 的新实例。
     /// </summary>
     /// <param name="dbFactory">数据库上下文工厂。</param>
@@ -104,6 +123,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     /// <param name="examQuestionAi">考试中单题 AI 讲解服务。</param>
     /// <param name="aiTrace">AI 调用轨迹。</param>
     /// <param name="configuration">应用配置（日出日落经纬度等）。</param>
+    /// <param name="doubaoModelConfig">方舟多档案模型配置（顶栏切换）。</param>
     /// <param name="logger">日志记录器。</param>
     public MainWindowViewModel(
         IDbContextFactory<AppDbContext> dbFactory,
@@ -115,6 +135,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         IExamQuestionAiExplainService examQuestionAi,
         AiCallTrace aiTrace,
         IConfiguration configuration,
+        DoubaoModelConfig doubaoModelConfig,
         ILogger<MainWindowViewModel> logger)
     {
         _dbFactory = dbFactory;
@@ -126,6 +147,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         _examQuestionAi = examQuestionAi;
         _aiTrace = aiTrace;
         _configuration = configuration;
+        _doubaoModelConfig = doubaoModelConfig;
         _logger = logger;
 
         _examTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
@@ -179,6 +201,14 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
 
         RefreshSunScheduleAndApplyTheme();
         _sunScheduleTimer.Start();
+
+        foreach (var item in _doubaoModelConfig.ListProfileItems())
+            AiModelProfileOptions.Add(item);
+
+        var activeId = _doubaoModelConfig.ActiveProfileId;
+        SelectedAiModelProfile = AiModelProfileOptions.FirstOrDefault(x =>
+            string.Equals(x.Id, activeId, StringComparison.OrdinalIgnoreCase))
+            ?? AiModelProfileOptions.FirstOrDefault();
     }
 
     /// <summary>
@@ -227,6 +257,17 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     public ObservableCollection<string> BankAiTemplateOptions { get; }
 
     /// <summary>
+    /// 顶栏：可选方舟模型档案（<c>appsettings.json</c> 中 <c>DoubaoModel:Profiles</c>）。
+    /// </summary>
+    public ObservableCollection<DoubaoModelProfileListItem> AiModelProfileOptions { get; } = new();
+
+    /// <summary>
+    /// 顶栏：当前选中的模型档案。
+    /// </summary>
+    [ObservableProperty]
+    private DoubaoModelProfileListItem? _selectedAiModelProfile;
+
+    /// <summary>
     /// 题库管理页：当前选中的 AI 出题模板显示名。
     /// </summary>
     [ObservableProperty]
@@ -272,10 +313,52 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     private string _bankAiProgressPhase = string.Empty;
 
     /// <summary>
+    /// 批量 AI 生成：目标题量（本次任务）。
+    /// </summary>
+    [ObservableProperty]
+    private int _bankAiProgressTarget;
+
+    /// <summary>
+    /// 批量 AI 生成：已成功入库题量。
+    /// </summary>
+    [ObservableProperty]
+    private int _bankAiProgressGenerated;
+
+    /// <summary>
+    /// 批量 AI 生成：尚未入库的剩余目标题量。
+    /// </summary>
+    [ObservableProperty]
+    private int _bankAiProgressRemaining;
+
+    /// <summary>
+    /// 批量 AI 生成：整体完成度（0～100），用于确定型进度条。
+    /// </summary>
+    [ObservableProperty]
+    private double _bankAiProgressPercent;
+
+    /// <summary>
+    /// 批量 AI 生成：当前是否正在等待单批模型响应（用于细条不确定进度动画）。
+    /// </summary>
+    [ObservableProperty]
+    private bool _bankAiBatchRequestActive;
+
+    /// <summary>
+    /// 批量 AI 生成：已生成 / 目标 / 未生成的一行统计文案。
+    /// </summary>
+    [ObservableProperty]
+    private string _bankAiProgressStatsLine = string.Empty;
+
+    /// <summary>
     /// 考试页：模型返回的当前题讲解文本。
     /// </summary>
     [ObservableProperty]
     private string _examAiExplanationText = string.Empty;
+
+    /// <summary>
+    /// 考试页：模型返回的最简结论（先于详解展示）。
+    /// </summary>
+    [ObservableProperty]
+    private string _examAiConclusionText = string.Empty;
 
     /// <summary>
     /// 考试页：单题讲解请求进行中。
@@ -521,6 +604,67 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     /// </summary>
     [ObservableProperty]
     private bool _persistWrongBookDetails = true;
+
+    partial void OnSelectedAiModelProfileChanged(DoubaoModelProfileListItem? value)
+    {
+        if (value is null)
+            return;
+
+        try
+        {
+            _doubaoModelConfig.SetActiveProfile(value.Id);
+            StatusMessage = "已切换 AI 模型：" + value.DisplayLabel;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "切换 AI 模型档案失败");
+        }
+    }
+
+    /// <summary>
+    /// 「增加模型」按钮。
+    /// </summary>
+    [RelayCommand]
+    private void AddAiModelProfile()
+    {
+        var dialog = new AddModelProfileDialog { Owner = Application.Current.MainWindow };
+        if (dialog.ShowDialog() != true)
+            return;
+
+        try
+        {
+            var profileId = GenerateProfileId(dialog.ProfileDisplayName, dialog.ProfileModelName);
+            var profile = new DoubaoModelProfileOptions
+            {
+                DisplayName = string.IsNullOrWhiteSpace(dialog.ProfileDisplayName) ? dialog.ProfileModelName : dialog.ProfileDisplayName,
+                ApiKey = dialog.ProfileApiKey,
+                ModelName = dialog.ProfileModelName,
+                BaseUrl = dialog.ProfileBaseUrl,
+                EnableThinking = dialog.ProfileEnableThinking
+            };
+
+            UserDoubaoProfileStore.Upsert(profileId, profile);
+            var listItem = _doubaoModelConfig.AddProfileAtRuntime(profileId, profile);
+            AiModelProfileOptions.Add(listItem);
+            SelectedAiModelProfile = listItem;
+            StatusMessage = "已添加模型：" + listItem.DisplayLabel;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "添加模型档案失败");
+            StatusMessage = "添加模型失败：" + ex.Message;
+        }
+    }
+
+    private static string GenerateProfileId(string displayName, string modelName)
+    {
+        var raw = string.IsNullOrWhiteSpace(displayName) ? modelName : displayName;
+        var clean = new string(raw.Where(c => char.IsLetterOrDigit(c) || c == '-' || c == '_').ToArray());
+        if (string.IsNullOrWhiteSpace(clean))
+            clean = "model";
+
+        return clean.Length > 24 ? clean[..24] : clean;
+    }
 
     partial void OnWrongBookDomainFilterChanged(string value)
     {
@@ -865,6 +1009,64 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// 登记当前 Ark 请求的可取消源：若已有进行中的请求则先取消其标记。
+    /// </summary>
+    private void RegisterAiCancellation(CancellationTokenSource cts)
+    {
+        CancellationTokenSource? previous;
+        lock (_aiRequestLock)
+        {
+            previous = _aiRequestCts;
+            _aiRequestCts = cts;
+        }
+
+        previous?.Cancel();
+        Ui(() => CancelActiveAiRequestCommand.NotifyCanExecuteChanged());
+    }
+
+    /// <summary>
+    /// 结束一次 Ark 请求登记：若仍是当前源则清空字段并释放。
+    /// </summary>
+    private void UnregisterAiCancellation(CancellationTokenSource owned)
+    {
+        lock (_aiRequestLock)
+        {
+            if (ReferenceEquals(_aiRequestCts, owned))
+            {
+                _aiRequestCts = null;
+            }
+        }
+
+        owned.Dispose();
+        Ui(() => CancelActiveAiRequestCommand.NotifyCanExecuteChanged());
+    }
+
+    /// <summary>
+    /// 取消按钮是否可用：存在未取消的当前请求源。
+    /// </summary>
+    private bool CanCancelActiveAiRequest()
+    {
+        lock (_aiRequestLock)
+        {
+            return _aiRequestCts is not null && !_aiRequestCts.IsCancellationRequested;
+        }
+    }
+
+    /// <summary>
+    /// 放弃当前进行中的 Ark 请求，不采用随后返回的结果。
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanCancelActiveAiRequest))]
+    private void CancelActiveAiRequest()
+    {
+        lock (_aiRequestLock)
+        {
+            _aiRequestCts?.Cancel();
+        }
+
+        CancelActiveAiRequestCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>
     /// 设置 AI 流水线可见状态。
     /// </summary>
     private void SetAiPipeline(string phase, string? detail = null)
@@ -951,7 +1153,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         EditorStem = value.Stem;
-        EditorStandardAnswer = value.StandardAnswer;
+        EditorStandardAnswer = value.StandardAnswer ?? string.Empty;
         EditorOptionsJson = value.OptionsJson ?? string.Empty;
         EditorKnowledgeTags = value.KnowledgeTags;
         EditorTopicTags = value.TopicTags ?? string.Empty;
@@ -1499,6 +1701,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         ExamUserAnswer = string.Empty;
         ExamDisplayIndex = 0;
         ExamAiExplanationText = string.Empty;
+        ExamAiConclusionText = string.Empty;
         StatusMessage = "已取消考试。";
     }
 
@@ -1568,10 +1771,14 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
                     QuestionId = q.Id,
                     Type = q.Type,
                     StemSummary = q.Stem.Length > 48 ? q.Stem[..48] + "…" : q.Stem,
+                    StemFull = q.Stem,
+                    OptionsJson = q.OptionsJson,
+                    KnowledgeTags = q.KnowledgeTags,
                     UserAnswer = answer,
                     StandardAnswer = q.StandardAnswer,
                     RootCause = string.Empty,
-                    SolutionHints = string.Empty
+                    SolutionHints = string.Empty,
+                    OptionAnalysis = string.Empty
                 });
             }
         }
@@ -1620,6 +1827,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         ExamUserAnswer = string.Empty;
         ExamDisplayIndex = 0;
         ExamAiExplanationText = string.Empty;
+        ExamAiConclusionText = string.Empty;
         }
         finally
         {
@@ -1813,6 +2021,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
                     MapDomainToUi(x.q.Domain),
                     MapTypeToUi(x.q.Type),
                     x.q.Stem,
+                    x.q.OptionsJson,
                     wrongText,
                     x.q.StandardAnswer,
                     x.w.WrongCount,
@@ -1859,22 +2068,25 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         }
 
         SetAiMainOutputLoading(true, "正在准备错题数据并发送 AI 解析请求…");
+        var aiCts = new CancellationTokenSource();
+        RegisterAiCancellation(aiCts);
+        var token = aiCts.Token;
         try
         {
-            await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(false);
+            await using var db = await _dbFactory.CreateDbContextAsync(token).ConfigureAwait(false);
             var userId = DatabaseInitializer.DemoUserId;
             var questions = await db.Questions.AsNoTracking()
                 .Where(q => ids.Contains(q.Id))
-                .ToListAsync()
+                .ToListAsync(token)
                 .ConfigureAwait(false);
             var entries = await db.WrongBookEntries.AsNoTracking()
                 .Where(w => w.UserId == userId && ids.Contains(w.QuestionId))
-                .ToListAsync()
+                .ToListAsync(token)
                 .ConfigureAwait(false);
             var wrongRecords = await db.AnswerRecords.AsNoTracking()
                 .Where(a => a.UserId == userId && !a.IsCorrect && ids.Contains(a.QuestionId))
                 .OrderByDescending(a => a.CreatedAtUtc)
-                .ToListAsync()
+                .ToListAsync(token)
                 .ConfigureAwait(false);
             var lastAnswerByQ = wrongRecords
                 .GroupBy(a => a.QuestionId)
@@ -1902,10 +2114,14 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
                     QuestionId = q.Id,
                     Type = q.Type,
                     StemSummary = q.Stem.Length > 48 ? q.Stem[..48] + "…" : q.Stem,
+                    StemFull = q.Stem,
+                    OptionsJson = q.OptionsJson,
+                    KnowledgeTags = q.KnowledgeTags,
                     UserAnswer = ua,
                     StandardAnswer = q.StandardAnswer,
                     RootCause = string.Empty,
-                    SolutionHints = string.Empty
+                    SolutionHints = string.Empty,
+                    OptionAnalysis = string.Empty
                 });
             }
 
@@ -1918,11 +2134,22 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             Ui(() => AiMainOutputBusyMessage = "正在发送错题解析请求并等待 AI 返回…");
             AppendAiLog($"AI 错题解析：请求 Ark，共 {batch.Count} 道");
             SetAiPipeline("正在发送", "错题解析");
-            var analyzed = await _aiTutor.AnalyzeWrongQuestionsAsync(batch).ConfigureAwait(false);
+            var analyzed = await _aiTutor.AnalyzeWrongQuestionsAsync(batch, token).ConfigureAwait(false);
+            if (token.IsCancellationRequested)
+            {
+                return;
+            }
+
             AiOutputText = FormatAiInsights(analyzed);
             ApplyAiTraceToUi("错题解析");
             StatusMessage = "AI 错题解析已完成。";
             _pendingWrongInsightsForAi.Clear();
+        }
+        catch (OperationCanceledException)
+        {
+            AppendAiLog("错题解析：用户已取消");
+            SetAiPipeline("已取消", string.Empty);
+            StatusMessage = "已取消本次 AI 错题解析。";
         }
         catch (Exception ex)
         {
@@ -1934,6 +2161,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         }
         finally
         {
+            UnregisterAiCancellation(aiCts);
             SetAiMainOutputLoading(false);
         }
     }
@@ -1944,6 +2172,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task RecommendAsync()
     {
+        CancellationTokenSource? aiCts = null;
         try
         {
             var domainScope = MapUiToDomainOrNull(WrongBookDomainFilter);
@@ -1962,6 +2191,9 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             }
 
             SetAiMainOutputLoading(true, "正在发送题目推荐请求并等待 AI 返回…");
+            aiCts = new CancellationTokenSource();
+            RegisterAiCancellation(aiCts);
+            var token = aiCts.Token;
             AppendAiLog("题目推荐：请求 Ark chat/completions");
             SetAiPipeline("正在发送", "题目推荐");
             var request = new QuestionRecommendationRequest
@@ -1969,13 +2201,29 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
                 SelectedWrongQuestionIds = selectedWrong,
                 DomainScope = domainScope
             };
-            var dto = await _recommendation.RecommendAsync(DatabaseInitializer.DemoUserId, request).ConfigureAwait(false);
+            var dto = await _recommendation.RecommendAsync(DatabaseInitializer.DemoUserId, request, token).ConfigureAwait(false);
+            if (token.IsCancellationRequested)
+            {
+                return;
+            }
+
             _recommendedQuestionIds = dto.RecommendedQuestionIds.ToList();
 
-            AiOutputText = await BuildRecommendationDisplayTextAsync(dto).ConfigureAwait(false);
+            AiOutputText = await BuildRecommendationDisplayTextAsync(dto, token).ConfigureAwait(false);
+            if (token.IsCancellationRequested)
+            {
+                return;
+            }
+
             ApplyAiTraceToUi("题目推荐");
             StatusMessage =
                 $"AI 推荐已生成（{_recommendedQuestionIds.Count} 题）。如需刷题请点击「用推荐题开始考试」；学习计划请在学习计划页单独生成。";
+        }
+        catch (OperationCanceledException)
+        {
+            AppendAiLog("题目推荐：用户已取消");
+            SetAiPipeline("已取消", string.Empty);
+            StatusMessage = "已取消本次 AI 题目推荐。";
         }
         catch (Exception ex)
         {
@@ -1987,6 +2235,11 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         }
         finally
         {
+            if (aiCts is not null)
+            {
+                UnregisterAiCancellation(aiCts);
+            }
+
             SetAiMainOutputLoading(false);
         }
     }
@@ -2119,21 +2372,24 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     private async Task ExecuteGenerateStudyPlanCoreAsync()
     {
         SetStudyPlanOutputLoading(true, "正在汇总答题数据并发送学习计划请求…");
+        var aiCts = new CancellationTokenSource();
+        RegisterAiCancellation(aiCts);
+        var token = aiCts.Token;
         try
         {
             AppendAiLog("学习计划：请求 Ark chat/completions");
             SetAiPipeline("正在发送", "学习计划");
-            await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(false);
+            await using var db = await _dbFactory.CreateDbContextAsync(token).ConfigureAwait(false);
             var userId = DatabaseInitializer.DemoUserId;
 
-            var total = await db.AnswerRecords.CountAsync(x => x.UserId == userId).ConfigureAwait(false);
-            var correct = await db.AnswerRecords.CountAsync(x => x.UserId == userId && x.IsCorrect).ConfigureAwait(false);
-            var wrongCount = await db.WrongBookEntries.CountAsync(x => x.UserId == userId).ConfigureAwait(false);
+            var total = await db.AnswerRecords.CountAsync(x => x.UserId == userId, token).ConfigureAwait(false);
+            var correct = await db.AnswerRecords.CountAsync(x => x.UserId == userId && x.IsCorrect, token).ConfigureAwait(false);
+            var wrongCount = await db.WrongBookEntries.CountAsync(x => x.UserId == userId, token).ConfigureAwait(false);
 
             var weakTags = await db.WrongBookEntries.AsNoTracking()
                 .Where(w => w.UserId == userId)
                 .Join(db.Questions.AsNoTracking(), w => w.QuestionId, q => q.Id, (_, q) => q.KnowledgeTags)
-                .ToListAsync()
+                .ToListAsync(token)
                 .ConfigureAwait(false);
 
             var tagHistogram = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -2161,11 +2417,22 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             };
 
             Ui(() => StudyPlanOutputBusyMessage = "正在调用 AI 生成学习计划，请稍候…");
-            var plan = await _studyPlan.GeneratePlanAsync(summary).ConfigureAwait(false);
+            var plan = await _studyPlan.GeneratePlanAsync(summary, token).ConfigureAwait(false);
+            if (token.IsCancellationRequested)
+            {
+                return;
+            }
+
             StudyPlanText =
                 $"{plan.Title}\r\n阶段：{plan.PhaseDays} 天；每日：{plan.DailyQuestionQuota} 题。\r\n重点：{string.Join("、", plan.FocusKnowledgeTags)}\r\n说明：{plan.Notes}";
             ApplyAiTraceToUi("学习计划");
             StatusMessage = "学习计划已生成。";
+        }
+        catch (OperationCanceledException)
+        {
+            AppendAiLog("学习计划：用户已取消");
+            SetAiPipeline("已取消", string.Empty);
+            StatusMessage = "已取消本次 AI 学习计划生成。";
         }
         catch (Exception ex)
         {
@@ -2177,6 +2444,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         }
         finally
         {
+            UnregisterAiCancellation(aiCts);
             SetStudyPlanOutputLoading(false);
         }
     }
@@ -2212,15 +2480,17 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             ExamProgressLabel = string.Empty;
             ExamUserAnswer = string.Empty;
             ExamAiExplanationText = string.Empty;
+            ExamAiConclusionText = string.Empty;
             return;
         }
 
         ExamAiExplanationText = string.Empty;
+        ExamAiConclusionText = string.Empty;
         var q = _examQuestions[ExamDisplayIndex - 1];
         ExamStem = q.Stem;
         ExamTypeText = MapTypeToUi(q.Type);
         ExamDifficultyText = MapDifficultyToUi(q.Difficulty);
-        ExamOptionsDisplay = FormatOptionsForDisplay(q.OptionsJson);
+        ExamOptionsDisplay = QuestionOptionsDisplayFormatter.FormatForDisplay(q.OptionsJson);
         ExamProgressLabel = $"第 {ExamDisplayIndex} / {_examQuestions.Count} 题 · 题库 Id={q.Id}";
         _questionStartedAtUtc = DateTime.UtcNow;
 
@@ -2305,37 +2575,6 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// 去掉选项正文中与当前键重复的「字母 + 句点/顿号」前缀（支持嵌套如「A. A. 正文」），
-    /// 以便 JSON 里已带「A. xxx」时不再与外层 <c>A. </c> 拼接成双前缀。
-    /// </summary>
-    /// <param name="optionKey">当前行键（单字符 A–Z）。</param>
-    /// <param name="storedLine">JSON 数组中的原始字符串。</param>
-    /// <returns>去重后的正文（不含行首键）。</returns>
-    private static string StripRedundantLeadingOptionPrefix(string optionKey, string storedLine)
-    {
-        if (string.IsNullOrWhiteSpace(storedLine) || optionKey.Length != 1)
-        {
-            return storedLine.Trim();
-        }
-
-        var keyUpper = char.ToUpperInvariant(optionKey[0]);
-        if (keyUpper is < 'A' or > 'Z')
-        {
-            return storedLine.Trim();
-        }
-
-        var t = storedLine.Trim();
-        while (t.Length >= 2
-               && char.ToUpperInvariant(t[0]) == keyUpper
-               && (t[1] == '.' || t[1] == '．' || t[1] == '、'))
-        {
-            t = t[2..].TrimStart();
-        }
-
-        return t;
-    }
-
-    /// <summary>
     /// 将选项 JSON 解析为 A/B/C… 键与展示行（与考试页原选项区文案一致）。
     /// </summary>
     private static List<(string Key, string Caption)> ParseExamOptionRows(string? optionsJson)
@@ -2357,7 +2596,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             for (var i = 0; i < arr.Count; i++)
             {
                 var label = ((char)('A' + i)).ToString();
-                var body = StripRedundantLeadingOptionPrefix(label, arr[i]);
+                var body = QuestionOptionsDisplayFormatter.StripRedundantLeadingOptionPrefix(label, arr[i]);
                 var caption = string.IsNullOrEmpty(body) ? $"{label}." : $"{label}. {body}";
                 list.Add((label, caption));
             }
@@ -2466,48 +2705,30 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         {
             sb.AppendLine("----");
             sb.AppendLine($"题号Id={it.QuestionId} [{MapTypeToUi(it.Type)}]");
-            sb.AppendLine($"题干摘要：{it.StemSummary}");
+            var stemBlock = !string.IsNullOrWhiteSpace(it.StemFull) ? it.StemFull : it.StemSummary;
+            sb.AppendLine($"题干：{stemBlock}");
+            if (!string.IsNullOrWhiteSpace(it.KnowledgeTags))
+            {
+                sb.AppendLine($"知识点标签：{it.KnowledgeTags}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(it.OptionsJson))
+            {
+                sb.AppendLine("选项一览：");
+                sb.AppendLine(QuestionOptionsDisplayFormatter.FormatForDisplay(it.OptionsJson).TrimEnd());
+            }
+
             sb.AppendLine($"你的答案：{it.UserAnswer} / 标准：{it.StandardAnswer}");
             sb.AppendLine($"原因：{it.RootCause}");
             sb.AppendLine($"思路：{it.SolutionHints}");
+            if (!string.IsNullOrWhiteSpace(it.OptionAnalysis))
+            {
+                sb.AppendLine("选项与要点辨析：");
+                sb.AppendLine(it.OptionAnalysis);
+            }
         }
 
         return sb.ToString();
-    }
-
-    /// <summary>
-    /// 将选项 JSON 解析为人类可读文本。
-    /// </summary>
-    private static string FormatOptionsForDisplay(string? optionsJson)
-    {
-        if (string.IsNullOrWhiteSpace(optionsJson))
-        {
-            return "（本题无选项 JSON：若为客观题，请直接按标准格式作答，例如 A 或 A,C）";
-        }
-
-        try
-        {
-            var arr = JsonSerializer.Deserialize<List<string>>(optionsJson);
-            if (arr is null || arr.Count == 0)
-            {
-                return optionsJson;
-            }
-
-            var sb = new StringBuilder();
-            for (var i = 0; i < arr.Count; i++)
-            {
-                var label = ((char)('A' + i)).ToString();
-                var body = StripRedundantLeadingOptionPrefix(label, arr[i]);
-                var line = string.IsNullOrEmpty(body) ? $"{label}." : $"{label}. {body}";
-                sb.AppendLine(line);
-            }
-
-            return sb.ToString().TrimEnd();
-        }
-        catch
-        {
-            return optionsJson;
-        }
     }
 
     /// <summary>
@@ -2705,7 +2926,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     };
 
     /// <summary>
-    /// 仅在「新建题目」（未选中表格行）时可用：按编辑器中的领域、题型、难度与分类标签/关键词向 AI 请求一道题，并填入表单；入库需用户点击「保存题目」。
+    /// 仅在「新建题目」（未选中表格行）时可用：按编辑器中的领域、题型、难度与分类标签/关键词向 AI 请求一道题，校验通过后自动写入题库并同步表单。
     /// </summary>
     /// <returns>表示异步操作的任务。</returns>
     [RelayCommand(CanExecute = nameof(CanFillEditorQuestionFromAi))]
@@ -2718,7 +2939,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
 
         var confirm = MessageBox.Show(
             $"将按当前设置向 AI 请求 1 道题目：\n领域「{EditorDomain}」、题型「{EditorType}」、难度「{EditorDifficulty}」。\n" +
-            "生成结果将填入右侧编辑器；确认无误后请点击「保存题目」写入题库。\n\n是否继续？",
+            "通过校验后将自动保存到题库并填入右侧编辑器。\n\n是否继续？",
             "AI 出题（新建）",
             MessageBoxButton.YesNo,
             MessageBoxImage.Question);
@@ -2747,11 +2968,14 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             templateType = MapUiToType(EditorType);
             diff = MapUiToDifficulty(EditorDifficulty);
         });
+        var aiCts = new CancellationTokenSource();
+        RegisterAiCancellation(aiCts);
+        var token = aiCts.Token;
         try
         {
             AppendAiLog($"编辑器 AI 单题：领域={editorDomainDisplay}，题型={templateType}，难度={diff}");
             SetAiPipeline("正在发送", "编辑器 AI 单题");
-            await Task.Delay(60).ConfigureAwait(false);
+            await Task.Delay(60, token).ConfigureAwait(false);
             Ui(() => EditorAiProgressPhase = "发送中，等待模型响应…");
 
             var hints = new QuestionBankGenerationHints
@@ -2762,11 +2986,16 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             };
 
             var result = await _questionBankAi
-                .GenerateQuestionsAsync(domain, editorDomainDisplay, templateType, 1, hints)
+                .GenerateQuestionsAsync(domain, editorDomainDisplay, templateType, 1, hints, token)
                 .ConfigureAwait(false);
 
+            if (token.IsCancellationRequested)
+            {
+                return;
+            }
+
             Ui(() => EditorAiProgressPhase = "解析与校验完成，正在填入表单…");
-            await Task.Delay(80).ConfigureAwait(false);
+            await Task.Delay(80, token).ConfigureAwait(false);
 
             if (result.Questions.Count == 0)
             {
@@ -2791,6 +3020,31 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
                 AppendAiLog("编辑器 AI 单题：另有未通过校验项 — " +
                              string.Join(" | ", result.Errors.Take(12)));
             }
+
+            // 与「保存题目」新增分支一致：补齐标签与元数据后写入数据库，避免仅停留在表单导致关闭即丢。
+            q.Domain = domain;
+            q.KnowledgeTags = string.IsNullOrWhiteSpace(q.KnowledgeTags)
+                ? (!string.IsNullOrWhiteSpace(editorDomainDisplay) ? editorDomainDisplay.Trim() : "未分类")
+                : q.KnowledgeTags.Trim();
+            q.OptionsJson = string.IsNullOrWhiteSpace(q.OptionsJson) ? null : q.OptionsJson.Trim();
+            q.TopicTags = sendHints && !string.IsNullOrEmpty(tags)
+                ? tags
+                : (string.IsNullOrWhiteSpace(q.TopicTags) ? string.Empty : q.TopicTags.Trim());
+            q.TopicKeywords = sendHints && !string.IsNullOrEmpty(kws)
+                ? kws
+                : (string.IsNullOrWhiteSpace(q.TopicKeywords) ? string.Empty : q.TopicKeywords.Trim());
+            q.Stem = q.Stem.Trim();
+            q.StandardAnswer = q.StandardAnswer.Trim();
+            q.IsEnabled = true;
+            q.CreatedAtUtc = DateTime.UtcNow;
+
+            await using (var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(false))
+            {
+                db.Questions.Add(q);
+                await db.SaveChangesAsync().ConfigureAwait(false);
+            }
+
+            AppendAiLog($"编辑器 AI 单题：已自动入库，题库 Id={q.Id}。");
 
             Ui(() =>
             {
@@ -2819,9 +3073,25 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
                 EditorType = MapTypeToUi(q.Type);
                 EditorDifficulty = MapDifficultyToUi(q.Difficulty);
                 SetAiPipeline("成功", "编辑器 AI 单题");
-                MessageBox.Show("已成功生成并填入题目。", "AI 出题", MessageBoxButton.OK, MessageBoxImage.Information);
-                StatusMessage = "已从 AI 填入题目，请检查后点击「保存题目」入库。";
+                MessageBox.Show("已成功生成并保存到题库。", "AI 出题", MessageBoxButton.OK, MessageBoxImage.Information);
+                StatusMessage = "已从 AI 生成并自动保存到题库，可在编辑器中继续修改后再点「保存题目」更新。";
             });
+
+            await RefreshBankAsync().ConfigureAwait(false);
+            Ui(() =>
+            {
+                var match = BankQuestions.FirstOrDefault(x => x.Id == q.Id);
+                if (match is not null)
+                {
+                    SelectedBankQuestion = match;
+                }
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            AppendAiLog("编辑器 AI 单题：用户已取消");
+            SetAiPipeline("已取消", string.Empty);
+            Ui(() => StatusMessage = "已取消本次 AI 出题。");
         }
         catch (Exception ex)
         {
@@ -2836,6 +3106,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         }
         finally
         {
+            UnregisterAiCancellation(aiCts);
             Ui(() =>
             {
                 IsEditorAiFillBusy = false;
@@ -2851,15 +3122,53 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         SelectedBankQuestion is null && !IsEditorAiFillBusy && !IsBankAiGenerating;
 
     /// <summary>
-    /// 调用 AI：按当前编辑器「领域」与所选模板生成题目，解析为 JSON 数组后批量写入题库。
+    /// 刷新批量 AI 出题进度区：已入库数、剩余目标、百分比与「单批请求中」动画开关。
+    /// </summary>
+    private void PushBankAiProgress(int target, int generated, bool batchRequestInFlight)
+    {
+        var rem = Math.Max(0, target - generated);
+        var pct = target > 0 ? Math.Min(100.0, 100.0 * generated / target) : 0.0;
+        Ui(() =>
+        {
+            BankAiProgressTarget = target;
+            BankAiProgressGenerated = generated;
+            BankAiProgressRemaining = rem;
+            BankAiProgressPercent = pct;
+            BankAiBatchRequestActive = batchRequestInFlight;
+            BankAiProgressStatsLine = $"已生成并入库 {generated} 道 · 目标 {target} 道 · 未生成 {rem} 道";
+        });
+    }
+
+    /// <summary>
+    /// 调用 AI：按「刷新题库」旁筛选的领域、难度、题型批量生成并入库（题型为「全部」时用 AI 模板决定题型）；难度为「全部」时各批内随机简单/中等/困难。
+    /// 多题时按 <see cref="BankAiGenerationChunkSize"/> 分多批调用模型，每批成功后立即入库，降低单次超时风险。
     /// </summary>
     [RelayCommand]
     private async Task GenerateBankQuestionsFromAiAsync()
     {
-        var templateType = MapBankAiTemplateToType(SelectedBankAiTemplate);
+        var typeFromFilter = MapUiToTypeOrNull(SelectedTypeFilter);
+        var templateType = typeFromFilter ?? MapBankAiTemplateToType(SelectedBankAiTemplate);
+        var domain = MapUiToDomainOrNull(SelectedDomainFilter) ?? QuestionDomain.Uncategorized;
+        var domainDisplay = SelectedDomainFilter;
+        var diffOrNull = MapUiToDifficultyOrNull(SelectedDifficultyFilter);
+        var bankAiHints = diffOrNull is null
+            ? new QuestionBankGenerationHints { RandomizeDifficultyInBatch = true }
+            : new QuestionBankGenerationHints { RequiredDifficulty = diffOrNull.Value };
+
+        var typeExplain = typeFromFilter is not null
+            ? $"题型筛选「{SelectedTypeFilter}」"
+            : $"题型筛选为「全部」，题型按 AI 模板「{SelectedBankAiTemplate}」";
+        var diffExplain = diffOrNull is null
+            ? "难度筛选「全部」（本批各题难度在简单/中等/困难间随机并尽量均衡）"
+            : $"难度筛选「{SelectedDifficultyFilter}」（本批均为该难度）";
+
         var confirm = MessageBox.Show(
-            $"将以编辑器中的领域「{EditorDomain}」与模板「{SelectedBankAiTemplate}」向 AI 请求生成题目（数量约 {BankAiGenCount}，以模型输出为准）。\n" +
-            "模型须返回 JSON 数组；仅通过校验的题目会写入当前题库。是否继续？",
+            "将按上方「刷新题库」左侧筛选条件生成题目（与右侧题目编辑器中的领域/难度无关）：\n" +
+            $"· 领域：「{SelectedDomainFilter}」\n" +
+            $"· {typeExplain}\n" +
+            $"· {diffExplain}\n" +
+            $"· 目标生成数量：{BankAiGenCount}（实际不超过 {BankAiGenerationMaxTotal}；将分多批请求，每批最多 {BankAiGenerationChunkSize} 题，以降低超时风险）\n\n" +
+            "模型须返回 JSON 数组；仅通过校验的题目会写入当前题库。\n\n是否继续？",
             "AI 按模板出题",
             MessageBoxButton.YesNo,
             MessageBoxImage.Question);
@@ -2874,71 +3183,143 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             IsBankAiGenerating = true;
             BankAiProgressPhase = "准备发送…";
         });
+        var aiCts = new CancellationTokenSource();
+        RegisterAiCancellation(aiCts);
+        var token = aiCts.Token;
+        var savedQuestions = new List<Question>();
         try
         {
-            AppendAiLog($"题库 AI 生成：领域={EditorDomain}，模板={SelectedBankAiTemplate}");
+            var totalRequested = Math.Clamp(BankAiGenCount, 1, BankAiGenerationMaxTotal);
+            PushBankAiProgress(totalRequested, 0, false);
+
+            AppendAiLog(
+                $"题库 AI 生成：筛选 领域={SelectedDomainFilter} 题型={SelectedTypeFilter} 难度={SelectedDifficultyFilter}；" +
+                $"实际 Domain={domain} Type={templateType} RandomDifficultyBatch={(diffOrNull is null)}");
             SetAiPipeline("正在发送", "题库 AI 生成");
-            await Task.Delay(60).ConfigureAwait(false);
-            Ui(() => BankAiProgressPhase = "发送中，等待模型响应…");
-            var domain = MapUiToDomain(EditorDomain);
-            var result = await _questionBankAi
-                .GenerateQuestionsAsync(domain, EditorDomain, templateType, BankAiGenCount)
-                .ConfigureAwait(false);
+            await Task.Delay(60, token).ConfigureAwait(false);
 
-            Ui(() => BankAiProgressPhase = "解析与写入题库…");
-            await Task.Delay(80).ConfigureAwait(false);
-
-            if (result.Questions.Count > 0)
+            if (totalRequested != BankAiGenCount)
             {
-                await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(false);
-                db.Questions.AddRange(result.Questions);
-                await db.SaveChangesAsync().ConfigureAwait(false);
+                AppendAiLog($"题库 AI 生成：请求数量已从 {BankAiGenCount} 调整为上限 {BankAiGenerationMaxTotal}。");
+            }
+
+            var allErrors = new List<string>();
+            string? lastSnippet = null;
+            var minBatches = (int)Math.Ceiling(totalRequested / (double)BankAiGenerationChunkSize);
+            var maxAttempts = minBatches + 10;
+
+            for (var attempt = 0; attempt < maxAttempts && savedQuestions.Count < totalRequested; attempt++)
+            {
+                var chunk = Math.Min(BankAiGenerationChunkSize, totalRequested - savedQuestions.Count);
+                if (chunk <= 0)
+                {
+                    break;
+                }
+
+                Ui(() => BankAiProgressPhase =
+                    $"第 {attempt + 1} 批（每批≤{BankAiGenerationChunkSize} 题）：请求 {chunk} 题，已入库 {savedQuestions.Count}/{totalRequested}…");
+                PushBankAiProgress(totalRequested, savedQuestions.Count, true);
+                await Task.Delay(40, token).ConfigureAwait(false);
+
+                var result = await _questionBankAi
+                    .GenerateQuestionsAsync(domain, domainDisplay, templateType, chunk, bankAiHints, token)
+                    .ConfigureAwait(false);
+
+                allErrors.AddRange(result.Errors);
+                if (!string.IsNullOrWhiteSpace(result.RawSnippet))
+                {
+                    lastSnippet = result.RawSnippet;
+                }
+
+                if (result.Questions.Count > 0)
+                {
+                    savedQuestions.AddRange(result.Questions);
+                    await using (var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(false))
+                    {
+                        db.Questions.AddRange(result.Questions);
+                        await db.SaveChangesAsync().ConfigureAwait(false);
+                    }
+
+                    AppendAiLog($"题库 AI 生成第 {attempt + 1} 批：本批入库 {result.Questions.Count} 题，累计 {savedQuestions.Count}/{totalRequested}。");
+                }
+                else
+                {
+                    AppendAiLog(
+                        $"题库 AI 生成第 {attempt + 1} 批：未得到有效题目（本批校验失败 {result.Errors.Count} 条）。");
+                }
+
+                Ui(() => BankAiProgressPhase = $"写入完成一批，累计 {savedQuestions.Count}/{totalRequested}…");
+                PushBankAiProgress(totalRequested, savedQuestions.Count, false);
+                await Task.Delay(50, token).ConfigureAwait(false);
             }
 
             ApplyAiTraceToUi("题库 AI 生成");
 
             var sb = new StringBuilder();
-            sb.AppendLine($"写入成功 {result.Questions.Count} 题。");
-            if (result.Errors.Count > 0)
+            sb.AppendLine($"目标 {totalRequested} 题，实际入库 {savedQuestions.Count} 题（分多批请求，每批最多 {BankAiGenerationChunkSize} 题）。");
+            if (savedQuestions.Count < totalRequested)
             {
-                sb.AppendLine($"另有 {result.Errors.Count} 条未通过校验：");
-                foreach (var e in result.Errors.Take(12))
+                sb.AppendLine("提示：未完全达到目标题量，可能因部分批次校验未通过或达到重试上限。");
+            }
+
+            if (allErrors.Count > 0)
+            {
+                sb.AppendLine($"各批校验失败合计 {allErrors.Count} 条（摘录前 12 条）：");
+                foreach (var e in allErrors.Take(12))
                 {
                     sb.AppendLine(" - " + e);
                 }
 
-                if (result.Errors.Count > 12)
+                if (allErrors.Count > 12)
                 {
-                    sb.AppendLine($" - …（其余 {result.Errors.Count - 12} 条略）");
+                    sb.AppendLine($" - …（其余 {allErrors.Count - 12} 条略）");
                 }
             }
 
-            if (!string.IsNullOrWhiteSpace(result.RawSnippet))
+            if (!string.IsNullOrWhiteSpace(lastSnippet))
             {
                 sb.AppendLine();
-                sb.AppendLine("模型输出片段（截断）：");
-                sb.AppendLine(result.RawSnippet);
+                sb.AppendLine("最后一批模型输出片段（截断）：");
+                sb.AppendLine(lastSnippet);
             }
 
             var summary = sb.ToString().TrimEnd();
             AppendAiLog("题库 AI 生成详情：" + Environment.NewLine + summary);
-            StatusMessage = $"AI 批量出题完成：已入库 {result.Questions.Count} 题。";
+            StatusMessage = $"AI 批量出题完成：已入库 {savedQuestions.Count} 题（目标 {totalRequested}）。";
             Ui(() =>
             {
                 SetAiPipeline("成功", "题库 AI 生成");
+                string msg;
+                if (savedQuestions.Count == 0)
+                {
+                    msg = "未写入任何题目，详情请查看下方 AI 日志。";
+                }
+                else if (savedQuestions.Count < totalRequested)
+                {
+                    msg = $"已入库 {savedQuestions.Count} 题（目标 {totalRequested}）。未完全达标时请查看 AI 日志中的校验说明。";
+                }
+                else
+                {
+                    msg = $"已成功生成并入库 {savedQuestions.Count} 题。";
+                }
+
                 MessageBox.Show(
-                    result.Questions.Count > 0
-                        ? $"已成功生成并入库 {result.Questions.Count} 题。"
-                        : "未写入任何题目，详情请查看下方 AI 日志。",
+                    msg,
                     "AI 出题",
                     MessageBoxButton.OK,
-                    result.Questions.Count > 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
+                    savedQuestions.Count > 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
             });
 
-            if (result.Questions.Count > 0)
+            if (savedQuestions.Count > 0)
             {
                 await RefreshBankAsync().ConfigureAwait(false);
             }
+        }
+        catch (OperationCanceledException)
+        {
+            AppendAiLog("题库 AI 生成：用户已取消");
+            SetAiPipeline("已取消", string.Empty);
+            StatusMessage = $"已取消 AI 批量出题（已入库 {savedQuestions.Count} 题将保留）。";
         }
         catch (Exception ex)
         {
@@ -2946,14 +3327,28 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             SetAiPipeline("失败", FormatExceptionMessage(ex));
             AppendAiLog("题库 AI 生成：失败 — " + FormatExceptionMessage(ex));
             StatusMessage = "题库 AI 生成失败：" + ex.Message;
-            MessageBox.Show("题库 AI 生成失败：" + FormatExceptionMessage(ex), "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            var partial = savedQuestions.Count > 0
+                ? $"\n\n此前批次已成功入库 {savedQuestions.Count} 题，数据已保留。"
+                : string.Empty;
+            MessageBox.Show("题库 AI 生成失败：" + FormatExceptionMessage(ex) + partial, "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            if (savedQuestions.Count > 0)
+            {
+                await RefreshBankAsync().ConfigureAwait(false);
+            }
         }
         finally
         {
+            UnregisterAiCancellation(aiCts);
             Ui(() =>
             {
                 IsBankAiGenerating = false;
                 BankAiProgressPhase = string.Empty;
+                BankAiBatchRequestActive = false;
+                BankAiProgressTarget = 0;
+                BankAiProgressGenerated = 0;
+                BankAiProgressRemaining = 0;
+                BankAiProgressPercent = 0;
+                BankAiProgressStatsLine = string.Empty;
             });
         }
     }
@@ -2974,15 +3369,33 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         var q = _examQuestions[ExamDisplayIndex - 1];
 
         Ui(() => IsExamAiExplainBusy = true);
+        var aiCts = new CancellationTokenSource();
+        RegisterAiCancellation(aiCts);
+        var token = aiCts.Token;
         try
         {
             AppendAiLog($"考试问 AI：题库 Id={q.Id}");
             SetAiPipeline("正在发送", "单题讲解");
-            var text = await _examQuestionAi.ExplainQuestionAsync(q, ExamUserAnswer).ConfigureAwait(false);
-            Ui(() => ExamAiExplanationText = text);
+            var explain = await _examQuestionAi.ExplainQuestionAsync(q, ExamUserAnswer, token).ConfigureAwait(false);
+            if (token.IsCancellationRequested)
+            {
+                return;
+            }
+
+            Ui(() =>
+            {
+                ExamAiConclusionText = explain.Conclusion;
+                ExamAiExplanationText = explain.Detail;
+            });
             ApplyAiTraceToUi("单题讲解");
             MessageBox.Show("小瘪三，这都不会", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
             StatusMessage = "已获取当前题的 AI 解析。";
+        }
+        catch (OperationCanceledException)
+        {
+            AppendAiLog("单题讲解：用户已取消");
+            SetAiPipeline("已取消", string.Empty);
+            StatusMessage = "已取消本次 AI 单题讲解。";
         }
         catch (Exception ex)
         {
@@ -2994,6 +3407,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         }
         finally
         {
+            UnregisterAiCancellation(aiCts);
             Ui(() => IsExamAiExplainBusy = false);
         }
     }

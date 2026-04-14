@@ -1,88 +1,198 @@
 using AiSmartDrill.App.Drill.Ai.Ark;
+using AiSmartDrill.App;
 using Microsoft.Extensions.Options;
 
 namespace AiSmartDrill.App.Drill.Ai.Config;
 
 /// <summary>
-/// 豆包模型配置管理类：从 <see cref="DoubaoModelOptions"/> 提供 Ark 调用所需的密钥、接入点与基址。
+/// 豆包模型运行时配置：支持多档案（端点/密钥/接入点）与界面切换当前档案。
 /// </summary>
-public class DoubaoModelConfig
+public sealed class DoubaoModelConfig
 {
     private readonly DoubaoModelOptions _options;
+    private readonly object _sync = new();
+    private string _activeProfileId;
 
     /// <summary>
-    /// 初始化 <see cref="DoubaoModelConfig"/> 的新实例。
+    /// 初始化：应用 <see cref="AiModelProfilePreferenceStore"/> 与 <see cref="DoubaoModelOptions.ActiveProfileId"/>。
     /// </summary>
-    /// <param name="optionsAccessor">由 DI 绑定的 <see cref="DoubaoModelOptions"/>（对应 appsettings 中 <c>DoubaoModel</c> 节）。</param>
     public DoubaoModelConfig(IOptions<DoubaoModelOptions> optionsAccessor)
     {
         _options = optionsAccessor.Value ?? throw new ArgumentNullException(nameof(optionsAccessor));
+        var profiles = _options.Profiles ?? new Dictionary<string, DoubaoModelProfileOptions>(StringComparer.OrdinalIgnoreCase);
+        if (profiles.Count == 0)
+            throw new InvalidOperationException("DoubaoModel:Profiles 为空；请检查配置绑定。");
+
+        var saved = AiModelProfilePreferenceStore.LoadActiveProfileIdOrNull();
+        if (!string.IsNullOrWhiteSpace(saved) && TryCanonicalProfileId(saved, out var canonSaved))
+            _activeProfileId = canonSaved;
+        else if (!string.IsNullOrWhiteSpace(_options.ActiveProfileId) &&
+                 TryCanonicalProfileId(_options.ActiveProfileId, out var canonOpt))
+            _activeProfileId = canonOpt;
+        else
+            _activeProfileId = profiles.Keys.OrderBy(k => k, StringComparer.Ordinal).First();
     }
 
     /// <summary>
-    /// API 密钥
+    /// 当前生效的档案键（与 <c>Profiles</c> 中键一致）。
     /// </summary>
-    public string ApiKey => _options.ApiKey;
+    public string ActiveProfileId
+    {
+        get
+        {
+            lock (_sync)
+                return _activeProfileId;
+        }
+    }
 
     /// <summary>
-    /// 请求体 <c>model</c> 字段：接入点 ID（<c>ep-...</c>）或模型 ID，与控制台配置一致即可。
+    /// 列出可供界面绑定的档案项。
     /// </summary>
-    public string ModelName => _options.ModelName;
+    public IReadOnlyList<DoubaoModelProfileListItem> ListProfileItems()
+    {
+        lock (_sync)
+        {
+            return _options.Profiles!
+                .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                .Select(kv => new DoubaoModelProfileListItem(kv.Key, FormatLabel(kv.Key, kv.Value)))
+                .ToList();
+        }
+    }
 
     /// <summary>
-    /// 可选备忘（如控制台模型名称），不参与 HTTP 请求体。
+    /// 切换当前档案并持久化偏好。
     /// </summary>
-    public string ModelId => _options.ModelId;
+    public void SetActiveProfile(string profileId)
+    {
+        if (string.IsNullOrWhiteSpace(profileId))
+            throw new ArgumentException("档案 Id 不能为空。", nameof(profileId));
+
+        lock (_sync)
+        {
+            if (!TryCanonicalProfileId(profileId, out var canon))
+                throw new ArgumentException($"未知模型档案：{profileId}", nameof(profileId));
+
+            if (string.Equals(_activeProfileId, canon, StringComparison.Ordinal))
+                return;
+
+            _activeProfileId = canon;
+        }
+
+        AiModelProfilePreferenceStore.SaveActiveProfileId(_activeProfileId);
+    }
 
     /// <summary>
-    /// 基础 URL
+    /// 供 HTTP 客户端在每次请求前读取的合并快照。
     /// </summary>
-    public string BaseUrl => _options.BaseUrl;
+    public DoubaoConnectionSnapshot GetConnectionSnapshot()
+    {
+        lock (_sync)
+        {
+            var prof = _options.Profiles![_activeProfileId];
+            return DoubaoConnectionSnapshot.Merge(_options, prof);
+        }
+    }
 
     /// <summary>
-    /// 聊天完成 API 完整 URL（与官方文档中的 <c>POST .../chat/completions</c> 一致）。
+    /// API 密钥（当前档案）。
+    /// </summary>
+    public string ApiKey => GetConnectionSnapshot().ApiKey;
+
+    /// <summary>
+    /// 请求体 model 字段（当前档案）。
+    /// </summary>
+    public string ModelName => GetConnectionSnapshot().ModelName;
+
+    /// <summary>
+    /// 备忘模型 Id（当前档案）。
+    /// </summary>
+    public string ModelId => GetConnectionSnapshot().ModelId;
+
+    /// <summary>
+    /// 根路径 URL（当前档案）。
+    /// </summary>
+    public string BaseUrl => GetConnectionSnapshot().BaseUrl;
+
+    /// <summary>
+    /// Chat Completions 完整 URL。
     /// </summary>
     public string ChatCompletionsEndpoint =>
-        $"{ArkApiEndpointNormalizer.ToChatCompletionsBaseUrl(BaseUrl).TrimEnd('/')}/chat/completions";
+        string.IsNullOrWhiteSpace(BaseUrl)
+            ? string.Empty
+            : $"{ArkApiEndpointNormalizer.ToChatCompletionsBaseUrl(BaseUrl).TrimEnd('/')}/chat/completions";
 
     /// <summary>
     /// 采样温度。
     /// </summary>
-    public double Temperature => _options.Temperature;
+    public double Temperature => GetConnectionSnapshot().Temperature;
 
     /// <summary>
-    /// 单次回复最大 token 数。
+    /// 单次回复最大 token。
     /// </summary>
-    public int MaxTokens => _options.MaxTokens;
+    public int MaxTokens => GetConnectionSnapshot().MaxTokens;
 
     /// <summary>
-    /// 超时设置
+    /// 超时。
     /// </summary>
-    public TimeSpan Timeout => TimeSpan.FromSeconds(_options.TimeoutSeconds);
+    public TimeSpan Timeout => TimeSpan.FromSeconds(GetConnectionSnapshot().TimeoutSeconds);
 
     /// <summary>
-    /// 最大重试次数
+    /// 最大重试次数。
     /// </summary>
-    public int MaxRetries => _options.MaxRetries;
+    public int MaxRetries => GetConnectionSnapshot().MaxRetries;
 
     /// <summary>
-    /// 是否启用思考能力
+    /// 是否启用思考能力。
     /// </summary>
-    public bool EnableThinking => _options.EnableThinking;
+    public bool EnableThinking => GetConnectionSnapshot().EnableThinking;
 
     /// <summary>
-    /// 是否启用视觉能力
+    /// 是否启用视觉能力。
     /// </summary>
-    public bool EnableVision => _options.EnableVision;
+    public bool EnableVision => GetConnectionSnapshot().EnableVision;
 
     /// <summary>
-    /// 验证配置是否有效
+    /// 当前档案连接信息是否可用于发起请求。
     /// </summary>
-    /// <returns>配置是否有效</returns>
     public bool IsValid()
     {
-        return !string.IsNullOrEmpty(ApiKey) &&
-               !string.IsNullOrEmpty(ModelName) &&
-               !string.IsNullOrEmpty(BaseUrl);
+        var s = GetConnectionSnapshot();
+        return !string.IsNullOrWhiteSpace(s.ApiKey) &&
+               !string.IsNullOrWhiteSpace(s.ModelName) &&
+               !string.IsNullOrWhiteSpace(s.BaseUrl);
+    }
+
+    /// <summary>
+    /// 运行时追加一个模型档案（已写入 appsettings 后调用）。
+    /// </summary>
+    public DoubaoModelProfileListItem AddProfileAtRuntime(string id, DoubaoModelProfileOptions profile)
+    {
+        lock (_sync)
+        {
+            _options.Profiles![id] = profile;
+        }
+
+        return new DoubaoModelProfileListItem(id, FormatLabel(id, profile));
+    }
+
+    private bool TryCanonicalProfileId(string requested, out string canonical)
+    {
+        canonical = string.Empty;
+        foreach (var k in _options.Profiles!.Keys)
+        {
+            if (k.Equals(requested.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                canonical = k;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string FormatLabel(string id, DoubaoModelProfileOptions p)
+    {
+        var name = p.DisplayName?.Trim();
+        return string.IsNullOrEmpty(name) ? id : $"{name}（{id}）";
     }
 }

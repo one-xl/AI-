@@ -1,3 +1,4 @@
+using AiSmartDrill.App;
 using AiSmartDrill.App.Drill.Ai.Client;
 using AiSmartDrill.App.Drill.Ai.Config;
 using Microsoft.Extensions.Configuration;
@@ -23,6 +24,8 @@ public static class DoubaoServiceCollectionExtensions
         {
             var o = new DoubaoModelOptions();
             configuration.GetSection(DoubaoModelOptions.SectionName).Bind(o);
+            o.NormalizeProfilesAfterBind();
+            UserDoubaoProfileStore.MergeInto(o);
             return Options.Create(o);
         });
         services.AddSingleton<DoubaoModelConfig>();

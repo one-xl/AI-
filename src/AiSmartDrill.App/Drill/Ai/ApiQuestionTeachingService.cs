@@ -47,18 +47,21 @@ public sealed class ApiQuestionTeachingService : IQuestionBankAiGenerationServic
         CancellationToken cancellationToken = default)
     {
         var n = Math.Clamp(count, 1, MaxGenerationCount);
+        var randomDiff = hints?.RandomizeDifficultyInBatch == true;
+        var lockedDiff = !randomDiff && hints?.RequiredDifficulty is { } ld ? ld : (DifficultyLevel?)null;
         _logger.LogInformation(
-            "AI 题库生成：Domain={Domain}, TemplateType={Type}, Count={Count}, LockedDifficulty={LockDiff}",
+            "AI 题库生成：Domain={Domain}, TemplateType={Type}, Count={Count}, LockedDifficulty={LockDiff}, RandomizeDifficulty={Rand}",
             domain,
             templateType,
             n,
-            hints?.RequiredDifficulty);
+            lockedDiff,
+            randomDiff);
 
         var typeToken = templateType.ToString();
         var typeChinese = MapTypeToChinese(templateType);
 
         var system =
-            "你是资深出题人。必须只输出一个 JSON 数组，不要 Markdown 围栏，不要任何说明文字。\n" +
+            "你是资深专业题库出题人。必须只输出一个 JSON 数组，不要 Markdown 围栏，不要任何说明文字。\n" +
             "数组每一项对象字段（英文字段名）：\n" +
             "- Type(string)：必须是 " + typeToken + "（不得改变）。\n" +
             "- Difficulty(string)：Easy / Medium / Hard 之一。\n" +
@@ -66,11 +69,21 @@ public sealed class ApiQuestionTeachingService : IQuestionBankAiGenerationServic
             "- StandardAnswer(string)：客观题用选项键（单选如 A；多选如 A,C；判断题用 对 或 错）；简答题用分号分隔关键词；填空题用合法正则表达式。\n" +
             "- OptionsJson(string 或 null)：若为单选/多选，必须是 JSON 数组的字符串形式，例如 [\"选项A文本\",\"选项B文本\"]（至少 2 项）；判断/简答/填空可 null。\n" +
             "- KnowledgeTags(string)：逗号分隔知识点标签。\n" +
-            "- TopicTags(string)：逗号分隔分类标签（可含「领域/层级」如 Python/基础，并组合概念/应用/语法/API/并发/数据结构/SQL 等细分词），用于推荐筛选。\n" +
-            "- TopicKeywords(string)：分号或逗号分隔检索关键词，须与题干主题一致。\n" +
-            "题目内容必须贴合用户给出的「领域」语境，且难度分布合理。";
+            "- TopicTags(string)：逗号分隔分类标签（须体现用户指定领域下的技术细分，如语法/并发/IO/网络协议/SQL 等），用于推荐筛选。\n" +
+            "- TopicKeywords(string)：分号或逗号分隔检索关键词，须与题干考查的技术主题一致。\n" +
+            "【领域纪律】用户会在下一条消息给出领域。所有题目的考查点必须落在该领域专业知识内；严禁把日常生活、购物、娱乐明星、体育比赛、社会新闻、家庭故事等作为题干主体或主要考查对象（最多允许一句极短类比，且设问仍须考专业点）。若用户领域为「未分类」，仍只出计算机与信息技术相关题，禁止纯生活常识题。";
 
-        if (hints?.RequiredDifficulty is DifficultyLevel locked)
+        if (randomDiff)
+        {
+            system += n <= 1
+                ? "\n【难度随机】本批仅 1 题：Difficulty 须在 Easy、Medium、Hard 中随机选一。"
+                : "\n【难度随机】本批共 " + n +
+                  " 题：每一条的 Difficulty 字段须独立在 Easy、Medium、Hard 三者中随机选取；" +
+                  (n >= 3
+                      ? "同一数组内三种难度都应尽量出现，分布大致均衡；禁止全部题目使用同一难度值。"
+                      : "尽量使各题难度不完全相同。");
+        }
+        else if (lockedDiff is DifficultyLevel locked)
         {
             system += "\n本次输出中每一条题目的 Difficulty 字段必须为 " + locked +
                       "（英文枚举名，与 Easy/Medium/Hard 对应），不得使用其他难度。";
@@ -78,10 +91,22 @@ public sealed class ApiQuestionTeachingService : IQuestionBankAiGenerationServic
 
         var userBuilder = new StringBuilder();
         userBuilder.AppendLine("领域（中文显示名）：" + domainDisplayName);
+        userBuilder.AppendLine("领域枚举（须与之一致，用于你对范围的自我校验）：" + domain + " → " + MapDomainToChinese(domain) + "。");
+        userBuilder.AppendLine(BuildDomainLockUserInstructions(domain, domainDisplayName));
         userBuilder.AppendLine("题型模板：" + typeChinese + "（Type 字段固定为 " + typeToken + "）");
         userBuilder.AppendLine("请生成 " + n + " 道互不重复、表述清晰的题目。");
 
-        if (hints?.RequiredDifficulty is DifficultyLevel req)
+        if (randomDiff)
+        {
+            userBuilder.AppendLine(
+                n <= 1
+                    ? "难度要求：本题 Difficulty 在 Easy、Medium、Hard 中随机选一。"
+                    : n >= 3
+                        ? "难度要求：本批 " + n +
+                          " 题请各题 Difficulty 在 Easy、Medium、Hard 间随机且整批尽量均衡，不得整批均为同一难度。"
+                        : "难度要求：本批 " + n + " 题请各题 Difficulty 在 Easy、Medium、Hard 间随机，尽量避免题题相同。");
+        }
+        else if (lockedDiff is DifficultyLevel req)
         {
             userBuilder.AppendLine("必须难度：Difficulty 字段只能为 " + req + "。");
         }
@@ -104,7 +129,9 @@ public sealed class ApiQuestionTeachingService : IQuestionBankAiGenerationServic
             new() { Role = "user", Content = user }
         };
 
-        var response = await _chat.GenerateCompletionAsync(messages, null, cancellationToken).ConfigureAwait(false);
+        var response = await _chat
+            .GenerateCompletionAsync(messages, null, AiCompletionTokenBudgets.BankGeneration(n), cancellationToken)
+            .ConfigureAwait(false);
         var raw = ArkAssistantReply.GetPrimaryText(response);
         var json = ArkModelOutputParsing.ExtractFirstJsonValue(raw);
         if (string.IsNullOrWhiteSpace(json))
@@ -136,7 +163,7 @@ public sealed class ApiQuestionTeachingService : IQuestionBankAiGenerationServic
         {
             var dto = parsed[i];
             var line = i + 1;
-            var err = ValidateGeneratedDto(dto, templateType, line, hints?.RequiredDifficulty);
+            var err = ValidateGeneratedDto(dto, templateType, line, randomDiff ? null : hints?.RequiredDifficulty);
             if (err is not null)
             {
                 errors.Add(err);
@@ -151,7 +178,7 @@ public sealed class ApiQuestionTeachingService : IQuestionBankAiGenerationServic
     }
 
     /// <inheritdoc />
-    public async Task<string> ExplainQuestionAsync(
+    public async Task<ExamQuestionExplainResult> ExplainQuestionAsync(
         Question question,
         string? userAnswerSnapshot,
         CancellationToken cancellationToken = default)
@@ -182,13 +209,19 @@ public sealed class ApiQuestionTeachingService : IQuestionBankAiGenerationServic
             {
                 Role = "system",
                 Content =
-                    "你是耐心讲师。请用中文输出一段完整解析：先点出考查点，再给出正确思路，必要时给出易错提醒。" +
-                    "不要输出问候语或自我称呼。不要使用 Markdown 代码围栏。"
+                    "你是耐心讲师。用中文输出，不要问候或自称，不要用 Markdown 代码围栏。\n" +
+                    "必须严格包含且仅使用以下两行作为段标题（不要加 # 号）：\n" +
+                    "【结论】\n" +
+                    "下一行起：用不超过 25 个汉字给出可判分的要点（客观题写正确选项键如 A 或 A,C，判断题写 对/错，简答写核心关键词短语）；不要写推理过程。\n" +
+                    "【详解】\n" +
+                    "下一行起：教学向展开，约 280～380 字：考查点一句；正确思路 2～4 短句；易错提醒一句（可省略）。"
             },
             new() { Role = "user", Content = userPayload.ToString() }
         };
 
-        var response = await _chat.GenerateCompletionAsync(messages, null, cancellationToken).ConfigureAwait(false);
+        var response = await _chat
+            .GenerateCompletionAsync(messages, null, AiCompletionTokenBudgets.ExamExplain, cancellationToken)
+            .ConfigureAwait(false);
         var text = ArkAssistantReply.GetPrimaryText(response).Trim();
         if (string.IsNullOrWhiteSpace(text))
         {
@@ -197,7 +230,7 @@ public sealed class ApiQuestionTeachingService : IQuestionBankAiGenerationServic
         }
 
         _trace.Set("exam-explain:ark", true);
-        return text;
+        return ExamQuestionExplainResult.ParseFromModelOutput(text);
     }
 
     /// <summary>
@@ -328,6 +361,27 @@ public sealed class ApiQuestionTeachingService : IQuestionBankAiGenerationServic
     {
         var t = raw.Trim();
         return t.Length <= RawSnippetMaxLen ? t : t[..RawSnippetMaxLen] + "…";
+    }
+
+    /// <summary>
+    /// 构造写入用户消息的「领域锁」说明，减少模型输出日常生活类跑题题。
+    /// </summary>
+    /// <param name="domain">当前选择的领域枚举。</param>
+    /// <param name="domainDisplayName">界面上的领域中文名（可能与枚举略不同）。</param>
+    private static string BuildDomainLockUserInstructions(QuestionDomain domain, string? domainDisplayName)
+    {
+        var display = string.IsNullOrWhiteSpace(domainDisplayName) ? "当前领域" : domainDisplayName.Trim();
+        var sb = new StringBuilder();
+        sb.AppendLine("【领域硬性要求】");
+        sb.AppendLine("- 题干、选项与标准答案所考查的知识点必须落在「" + display + "」相关的专业技术范围内（教材、认证考点或常见工程问题）。");
+        sb.AppendLine("- 禁止以下类型作为题干主体或主要考查对象：日常生活琐事、购物消费、家庭人际、明星综艺、体育比赛、社会新闻与八卦、纯作文式感悟等与信息技术职业能力无关的内容。");
+        sb.AppendLine("- 若需要降低理解门槛，最多用一句极简类比，但设问与判分点仍必须是上述专业技术点，不得让生活故事成为题目核心。");
+        if (domain == QuestionDomain.Uncategorized)
+        {
+            sb.AppendLine("- 当前领域标签偏宽：请只出计算机与信息技术范畴内的通用题（如数据结构、网络、操作系统、数据库、编程语言机制等），仍禁止纯生活常识题。");
+        }
+
+        return sb.ToString().TrimEnd();
     }
 
     private static string MapTypeToChinese(QuestionType t) => t switch

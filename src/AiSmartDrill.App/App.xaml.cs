@@ -74,7 +74,7 @@ public partial class App : System.Windows.Application
         }
         else
         {
-            startupLogger.LogInformation("Doubao Ark 语言模型已配置：接入点/模型标识已绑定。");
+            startupLogger.LogInformation("Doubao Ark 已配置，当前档案：{Profile}", doubaoCfg.ActiveProfileId);
         }
 
         var initializer = _serviceProvider.GetRequiredService<DatabaseInitializer>();

@@ -61,7 +61,7 @@ dotnet build AiSmartDrill.sln -c Release
    - **`ConnectionStrings:Default`**：SQLite 路径；默认 `Data Source=AiSmartDrill.db` 表示数据库文件与程序输出目录同级（随 `dotnet run` 或 VS 调试输出位置变化）
    - **`DoubaoModel:ApiKey`**：替换为你的方舟 API Key（勿提交到 Git）
    - **`DoubaoModel:ModelName`**：替换为你的推理接入点 ID（一般为 `ep-...`）
-   - **`DoubaoModel:BaseUrl`**：一般为 `https://ark.cn-beijing.volces.com/api/v3/`（与控制台地域一致即可）
+   - **`DoubaoModel:BaseUrl`**：填控制台「OpenAI 兼容」接口文档中给出的根路径（到 `/api/v3/` 为止，与所选地域一致）
 
 也可使用 **用户机密**（推荐开发机）避免明文落在磁盘上被误提交：
 
