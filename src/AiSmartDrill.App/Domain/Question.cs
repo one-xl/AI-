@@ -41,12 +41,17 @@ public sealed class Question
     public string? OptionsJson { get; set; }
 
     /// <summary>
-    /// 获取或设置知识点标签（逗号分隔），供推荐与统计使用。
+    /// 获取或设置细粒度知识点标签（逗号分隔）：可教、可测的考点短语；领域以 <see cref="Domain"/> 为准，勿在此重复填领域名。
     /// </summary>
     public string KnowledgeTags { get; set; } = string.Empty;
 
     /// <summary>
-    /// 获取或设置领域内的分类标签（逗号/分号分隔），用于 AI 推荐与题库细分检索。
+    /// 获取或设置本题主知识点（应与 <see cref="KnowledgeTags"/> 中某一项一致），供推荐与统计做严格匹配。
+    /// </summary>
+    public string PrimaryKnowledgePoint { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 获取或设置领域内的模块/大标签（逗号/分号分隔），用于章节级筛选与学习计划中的模块弱项。
     /// </summary>
     public string TopicTags { get; set; } = string.Empty;
 

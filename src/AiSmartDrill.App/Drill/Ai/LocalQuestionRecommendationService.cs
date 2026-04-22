@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging;
 namespace AiSmartDrill.App.Drill.Ai;
 
 /// <summary>
-/// 本地占位实现的题目推荐：与云端版一致的排除错题、领域范围与标签/关键词筛选逻辑。
+/// 本地占位实现的题目推荐：与云端版一致的排除错题、领域范围、主知识点与标签/关键词筛选逻辑。
 /// </summary>
 public sealed class LocalQuestionRecommendationService : IQuestionRecommendationService
 {
@@ -67,65 +67,91 @@ public sealed class LocalQuestionRecommendationService : IQuestionRecommendation
                 .ConfigureAwait(false);
         }
 
-        var focusTags = InferFocusTags(contextQuestions);
-        var focusKeywords = InferFocusKeywords(contextQuestions);
+        var performanceSummary = await UserPerformanceSummaryFactory.CreateAsync(db, userId, cancellationToken)
+            .ConfigureAwait(false);
 
+        var effectiveDomain = request.DomainScope
+                              ?? KnowledgePointInference.InferMajorityDomain(contextQuestions)
+                              ?? await KnowledgePointCatalogQuery.InferDominantDomainFromWrongBookAsync(
+                                      db,
+                                      userId,
+                                      request,
+                                      cancellationToken)
+                                  .ConfigureAwait(false);
         var candidates = await (
                 from q in db.Questions.AsNoTracking()
                 where q.IsEnabled && !wrongSet.Contains(q.Id)
-                where request.DomainScope == null || q.Domain == request.DomainScope.Value
+                where effectiveDomain == null || q.Domain == effectiveDomain.Value
                 orderby q.Id descending
                 select q)
             .Take(400)
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        var strict = candidates
-            .Where(q => RecommendationMatcher.MatchesStrict(q, focusTags, focusKeywords))
-            .OrderByDescending(q => ScoreLocal(q, focusTags, focusKeywords))
-            .ThenByDescending(q => q.Id)
-            .ToList();
+        var focusTags = MergeTokenLists(InferFocusTags(contextQuestions), request.ExternalSkillHints);
+        var focusKeywords = MergeTokenLists(InferFocusKeywords(contextQuestions), request.ExternalSkillHints);
+        const int catalogAlignPool = 200;
+        IReadOnlyList<string> fullKpCatalog = effectiveDomain is { } catalogDom
+            ? await KnowledgePointCatalogQuery.LoadOrderedByFrequencyAsync(
+                    db,
+                    catalogDom,
+                    catalogAlignPool,
+                    cancellationToken)
+                .ConfigureAwait(false)
+            : Array.Empty<string>();
+        var resolvedKpRaw = KnowledgePointInference.InferPrimaryKnowledgePoint(contextQuestions)
+                            ?? (request.ExternalSkillHints.Count > 0 ? request.ExternalSkillHints[0] : null)
+                            ?? (performanceSummary.WeakKnowledgePoints.Count > 0
+                                ? performanceSummary.WeakKnowledgePoints[0]
+                                : null);
+        var resolvedKp = KnowledgePointCatalogQuery.AlignFocusKnowledgePoint(resolvedKpRaw, fullKpCatalog);
 
-        var final = strict.Select(q => q.Id).Take(TargetCount).ToList();
+        var (final, relaxedKp) = RecommendationIdAssembly.AssembleRecommendedIds(
+            candidates,
+            focusTags,
+            focusKeywords,
+            resolvedKp,
+            Array.Empty<long>(),
+            TargetCount);
+
         if (final.Count < TargetCount)
         {
-            foreach (var q in candidates.Where(q => RecommendationMatcher.MatchesRelaxed(q, focusTags, focusKeywords)))
+            var moreIds = await db.Questions.AsNoTracking()
+                .Where(q => q.IsEnabled && !wrongSet.Contains(q.Id))
+                .Where(q => effectiveDomain == null || q.Domain == effectiveDomain.Value)
+                .OrderByDescending(q => q.Id)
+                .Select(q => q.Id)
+                .Take(TargetCount * 2)
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+            foreach (var id in moreIds)
             {
                 if (final.Count >= TargetCount)
                 {
                     break;
                 }
 
-                if (!final.Contains(q.Id))
+                if (!final.Contains(id))
                 {
-                    final.Add(q.Id);
+                    final.Add(id);
                 }
             }
         }
 
-        if (final.Count < TargetCount)
+        var rationale = focusTags.Count == 0 && focusKeywords.Count == 0
+            ? "暂无错题标签/关键词信号：在领域与排除错题约束下推荐最近题目。"
+            : "基于错题主知识点与 TopicTags/TopicKeywords，在排除错题本后的候选集中筛选。";
+        if (relaxedKp)
         {
-            foreach (var q in candidates)
-            {
-                if (final.Count >= TargetCount)
-                {
-                    break;
-                }
-
-                if (!final.Contains(q.Id))
-                {
-                    final.Add(q.Id);
-                }
-            }
+            rationale += "（同知识点候选不足，已部分放宽）";
         }
 
         _logger.LogInformation("AI 题目推荐（占位）：UserId={UserId}, Picked={Count}", userId, final.Count);
 
         return new QuestionRecommendationDto
         {
-            Rationale = focusTags.Count == 0 && focusKeywords.Count == 0
-                ? "暂无错题标签/关键词信号：在领域与排除错题约束下推荐最近题目。"
-                : "基于错题 TopicTags/TopicKeywords 与知识点，在排除错题本后的候选集中筛选。",
+            Rationale = rationale,
+            FocusKnowledgePoint = resolvedKp,
             FocusTags = focusTags,
             FocusKeywords = focusKeywords,
             RecommendedQuestionIds = final.Take(TargetCount).ToList()
@@ -144,7 +170,10 @@ public sealed class LocalQuestionRecommendationService : IQuestionRecommendation
 
             foreach (var t in RecommendationMatcher.Tokenize(q.KnowledgeTags))
             {
-                bag[t] = bag.TryGetValue(t, out var c) ? c + 1 : 1;
+                if (!KnowledgeTagStopwords.IsStopword(t))
+                {
+                    bag[t] = bag.TryGetValue(t, out var c) ? c + 1 : 1;
+                }
             }
         }
 
@@ -168,25 +197,34 @@ public sealed class LocalQuestionRecommendationService : IQuestionRecommendation
         return bag.OrderByDescending(kv => kv.Value).Take(6).Select(kv => kv.Key).ToList();
     }
 
-    private static int ScoreLocal(Question q, IReadOnlyList<string> focusTags, IReadOnlyList<string> focusKeywords)
+    private static IReadOnlyList<string> MergeTokenLists(IReadOnlyList<string> baseTokens, IReadOnlyList<string> extra)
     {
-        var s = 0;
-        foreach (var t in focusTags)
+        if (extra.Count == 0)
         {
-            if (RecommendationMatcher.TagFieldsContain(q, t))
+            return baseTokens;
+        }
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var list = new List<string>();
+        foreach (var x in baseTokens)
+        {
+            var t = (x ?? string.Empty).Trim();
+            if (t.Length > 0 && seen.Add(t))
             {
-                s += 3;
+                list.Add(t);
             }
         }
 
-        foreach (var k in focusKeywords)
+        foreach (var x in extra)
         {
-            if (RecommendationMatcher.KeywordHit(q, k))
+            var t = (x ?? string.Empty).Trim();
+            if (t.Length > 0 && seen.Add(t))
             {
-                s += 2;
+                list.Add(t);
             }
         }
 
-        return s;
+        return list;
     }
 }
+

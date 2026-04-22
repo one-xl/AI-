@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using AiSmartDrill.App.Domain;
 using AiSmartDrill.App.ViewModels;
+using System.Threading.Tasks;
 
 namespace AiSmartDrill.App;
 
@@ -28,11 +29,12 @@ public partial class MainWindow : Window
     /// <summary>
     /// 订阅 ViewModel 事件：考试开始时切换到考试标签页。
     /// </summary>
-    private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         if (DataContext is MainWindowViewModel vm)
         {
             vm.ExamStarted += ViewModel_ExamStarted;
+            await vm.ProcessCareerPathStartupIfAnyAsync().ConfigureAwait(true);
         }
     }
 

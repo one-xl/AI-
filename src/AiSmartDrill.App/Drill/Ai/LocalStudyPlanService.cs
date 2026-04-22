@@ -31,15 +31,20 @@ public sealed class LocalStudyPlanService : IStudyPlanService
         var daily = (int)Math.Clamp(Math.Round(12 + (1.0 - accuracy) * 20), 8, 28);
         var days = summary.WrongBookCount >= 8 ? 14 : 7;
 
-        var tags = summary.WeakTags.Count > 0
-            ? summary.WeakTags
+        var moduleTags = summary.WeakTopicTags.Count > 0
+            ? summary.WeakTopicTags
             : new[] { "基础巩固", "错题复盘", "限时训练" }.ToList();
+
+        var finePoints = summary.WeakKnowledgePoints.Count > 0
+            ? summary.WeakKnowledgePoints
+            : new[] { "核心概念复盘", "典型题再练", "易错点对照" }.ToList();
 
         var plan = new StudyPlanDto
         {
             Title = "个性化阶段性刷题计划（演示）",
             DailyQuestionQuota = daily,
-            FocusKnowledgeTags = tags,
+            FocusKnowledgeTags = moduleTags,
+            FocusKnowledgePoints = finePoints,
             PhaseDays = days,
             Notes =
                 $"当前估算正确率：{accuracy:P0}。建议每天完成 {daily} 题，并优先处理错题本中 {summary.WrongBookCount} 个薄弱点。"

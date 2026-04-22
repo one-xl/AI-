@@ -1,12 +1,16 @@
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Security.Cryptography;
+using System.Runtime.InteropServices;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Text;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Threading;
+using System.Windows.Interop;
 using AiSmartDrill.App;
+using AiSmartDrill.App.CareerPath;
 using Microsoft.Win32;
 using AiSmartDrill.App.Drill.Ai;
 using AiSmartDrill.App.Drill.Ai.Config;
@@ -110,6 +114,53 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     /// 多批次合计生成题量上限，防止误输入导致长时间占用。
     /// </summary>
     private const int BankAiGenerationMaxTotal = 96;
+    private const int CareerPathMissingQuestionDefaultCount = 20;
+
+    /// <summary>
+    /// 复用题库 AI 批量生成核心流程时的运行参数。
+    /// </summary>
+    private sealed class BankAiGenerationSessionOptions
+    {
+        /// <summary>
+        /// 获取或设置目标领域。
+        /// </summary>
+        public required QuestionDomain Domain { get; init; }
+
+        /// <summary>
+        /// 获取或设置领域显示名。
+        /// </summary>
+        public required string DomainDisplayName { get; init; }
+
+        /// <summary>
+        /// 获取或设置固定题型。
+        /// </summary>
+        public required QuestionType TemplateType { get; init; }
+
+        /// <summary>
+        /// 获取或设置目标题量。
+        /// </summary>
+        public required int RequestedCount { get; init; }
+
+        /// <summary>
+        /// 获取或设置生成提示约束。
+        /// </summary>
+        public required QuestionBankGenerationHints Hints { get; init; }
+
+        /// <summary>
+        /// 获取或设置 AI 管线与日志标题。
+        /// </summary>
+        public required string OperationTitle { get; init; }
+
+        /// <summary>
+        /// 获取或设置完成弹窗标题。
+        /// </summary>
+        public string CompletionDialogTitle { get; init; } = "AI 出题";
+
+        /// <summary>
+        /// 获取或设置是否展示完成弹窗。
+        /// </summary>
+        public bool ShowCompletionDialog { get; init; } = true;
+    }
 
     /// <summary>
     /// 初始化 <see cref="MainWindowViewModel"/> 的新实例。
@@ -414,13 +465,19 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     private string _editorOptionsJson = string.Empty;
 
     /// <summary>
-    /// 编辑器：知识点标签。
+    /// 编辑器：细粒度知识点（逗号分隔），须可测可教；领域以领域下拉为准。
     /// </summary>
     [ObservableProperty]
     private string _editorKnowledgeTags = string.Empty;
 
     /// <summary>
-    /// 编辑器：领域内向细分分类标签（逗号分隔），参与 AI 推荐筛选。
+    /// 编辑器：主知识点（与细知识点中一项一致，供推荐严格匹配）。
+    /// </summary>
+    [ObservableProperty]
+    private string _editorPrimaryKnowledgePoint = string.Empty;
+
+    /// <summary>
+    /// 编辑器：模块/大标签（逗号分隔），参与学习计划模块弱项与推荐辅助筛选。
     /// </summary>
     [ObservableProperty]
     private string _editorTopicTags = string.Empty;
@@ -985,6 +1042,11 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     /// </summary>
     private List<long> _recommendedQuestionIds = new();
 
+    /// <summary>
+    /// 防止 CareerPath 启动参数与 IPC 重复投递并发执行同一套刷题/推荐流程。
+    /// </summary>
+    private readonly SemaphoreSlim _careerPathImportGate = new(1, 1);
+
     /// <inheritdoc />
     public void Dispose()
     {
@@ -994,6 +1056,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         _sunScheduleTimer.Stop();
         _headerClockTimer.Tick -= OnHeaderClockTimerTick;
         _headerClockTimer.Stop();
+        _careerPathImportGate.Dispose();
     }
 
     /// <summary>
@@ -1128,6 +1191,30 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// 规范化主知识点：优先编辑器主知识点；否则取细知识点中首个非停用词；再否则为「未分类」。
+    /// </summary>
+    private string NormalizeEditorPrimaryKnowledgePoint() =>
+        NormalizePrimaryKnowledgePoint(EditorPrimaryKnowledgePoint, EditorKnowledgeTags);
+
+    private static string NormalizePrimaryKnowledgePoint(string? primaryField, string knowledgeTagsCsv)
+    {
+        var raw = (primaryField ?? string.Empty).Trim();
+        if (raw.Length > 128)
+            raw = raw[..128];
+
+        if (raw.Length > 0)
+            return raw;
+
+        foreach (var t in RecommendationMatcher.Tokenize(knowledgeTagsCsv))
+        {
+            if (!KnowledgeTagStopwords.IsStopword(t))
+                return t.Length > 128 ? t[..128] : t;
+        }
+
+        return "未分类";
+    }
+
+    /// <summary>
     /// 根据 <see cref="AiCallTrace"/> 刷新「AI 请求状态」与日志，区分方舟是否真正返回可用结果。
     /// </summary>
     private void ApplyAiTraceToUi(string stepChineseName)
@@ -1156,6 +1243,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         EditorStandardAnswer = value.StandardAnswer ?? string.Empty;
         EditorOptionsJson = value.OptionsJson ?? string.Empty;
         EditorKnowledgeTags = value.KnowledgeTags;
+        EditorPrimaryKnowledgePoint = value.PrimaryKnowledgePoint ?? string.Empty;
         EditorTopicTags = value.TopicTags ?? string.Empty;
         EditorTopicKeywords = value.TopicKeywords ?? string.Empty;
         EditorType = MapTypeToUi(value.Type);
@@ -1243,6 +1331,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
                     StandardAnswer = EditorStandardAnswer.Trim(),
                     OptionsJson = string.IsNullOrWhiteSpace(EditorOptionsJson) ? null : EditorOptionsJson.Trim(),
                     KnowledgeTags = string.IsNullOrWhiteSpace(EditorKnowledgeTags) ? "未分类" : EditorKnowledgeTags.Trim(),
+                    PrimaryKnowledgePoint = NormalizeEditorPrimaryKnowledgePoint(),
                     TopicTags = string.IsNullOrWhiteSpace(EditorTopicTags) ? string.Empty : EditorTopicTags.Trim(),
                     TopicKeywords = string.IsNullOrWhiteSpace(EditorTopicKeywords) ? string.Empty : EditorTopicKeywords.Trim(),
                     Type = type,
@@ -1265,6 +1354,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
                 entity.StandardAnswer = EditorStandardAnswer.Trim();
                 entity.OptionsJson = string.IsNullOrWhiteSpace(EditorOptionsJson) ? null : EditorOptionsJson.Trim();
                 entity.KnowledgeTags = string.IsNullOrWhiteSpace(EditorKnowledgeTags) ? "未分类" : EditorKnowledgeTags.Trim();
+                entity.PrimaryKnowledgePoint = NormalizeEditorPrimaryKnowledgePoint();
                 entity.TopicTags = string.IsNullOrWhiteSpace(EditorTopicTags) ? string.Empty : EditorTopicTags.Trim();
                 entity.TopicKeywords = string.IsNullOrWhiteSpace(EditorTopicKeywords) ? string.Empty : EditorTopicKeywords.Trim();
                 entity.Type = type;
@@ -1390,6 +1480,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         EditorStandardAnswer = string.Empty;
         EditorOptionsJson = string.Empty;
         EditorKnowledgeTags = string.Empty;
+        EditorPrimaryKnowledgePoint = string.Empty;
         EditorTopicTags = string.Empty;
         EditorTopicKeywords = string.Empty;
         EditorType = "单选";
@@ -2350,6 +2441,552 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         }
     }
 
+    #region CareerPath 技能包（CLI --import）
+
+    /// <summary>
+    /// 主窗口加载后调用：若启动参数含 <c>--import</c>，则加载 .skillpkg 并进入直接刷题或 AI 推荐流程。
+    /// </summary>
+    public async Task ProcessCareerPathStartupIfAnyAsync()
+    {
+        var path = CareerPathStartupState.ImportPath;
+        var modeCli = CareerPathStartupState.ModeFromCli;
+        var autoProceed = CareerPathStartupState.AutoProceedFromCli;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        CareerPathStartupState.ImportPath = null;
+        CareerPathStartupState.ModeFromCli = null;
+        CareerPathStartupState.AutoProceedFromCli = false;
+
+        await ProcessCareerPathImportAsync(path, modeCli, autoProceed).ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// 处理技能包（冷启动参数或来自已运行实例的 IPC）。<paramref name="importPath"/> 为空时仅将主窗口置前。
+    /// </summary>
+    public async Task ProcessCareerPathImportAsync(string? importPath, string? modeCli, bool autoProceed)
+    {
+        await _careerPathImportGate.WaitAsync().ConfigureAwait(true);
+        try
+        {
+            if (string.IsNullOrWhiteSpace(importPath))
+            {
+                ActivateMainWindowForCareerPath();
+                StatusMessage = "已切换到刷题软件，可继续刷题或 AI 推荐。";
+                return;
+            }
+
+            ActivateMainWindowForCareerPath();
+
+            if (!CareerPathSkillPackageJson.TryLoad(importPath, out var pkg, out var err))
+            {
+                MessageBox.Show(
+                    err ?? "无法加载技能包。",
+                    "CareerPath 技能包",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+
+            if (pkg!.Source is { } src &&
+                !src.Equals("careerpath_ai", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation("技能包 source 非 careerpath_ai：{Source}", src);
+            }
+
+            var mode = CareerPathModeResolver.ResolveEffective(pkg, modeCli, _logger);
+            var skills = (pkg.Skills ?? Array.Empty<string>())
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Select(s => s.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (skills.Count == 0)
+            {
+                MessageBox.Show(
+                    "技能包中 skills 为空，无法开始。",
+                    "CareerPath 技能包",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+
+            var jc = pkg.JobContext;
+            var jobSummary = jc?.JobSummary ?? string.Empty;
+            var diffHint = jc?.Difficulty ?? string.Empty;
+            var examOpts = pkg.ExamOptions;
+            var examCountDefault = examOpts?.QuestionCount is >= 1 and <= 50
+                ? examOpts.QuestionCount.Value
+                : ExamQuestionCount;
+            var mergedDiffHint = !string.IsNullOrWhiteSpace(examOpts?.Difficulty)
+                ? examOpts!.Difficulty
+                : diffHint;
+
+            if (mode == CareerPathPracticeModeKind.Direct)
+            {
+                QuestionDomain? directDomain = null;
+                DifficultyLevel? directDiff = null;
+                var directCount = examCountDefault;
+
+                if (!autoProceed)
+                {
+                    var perSkill = await CareerPathQuestionInventory.GetPerSkillCountsAsync(_dbFactory, skills)
+                        .ConfigureAwait(true);
+                    var byDom = await CareerPathQuestionInventory.GetMatchingCountsByDomainAsync(_dbFactory, skills)
+                        .ConfigureAwait(true);
+                    var infer = CareerPathDomainInference.InferDomain(skills, jobSummary);
+                    var inferLine =
+                        $"规则推断领域：{CareerPathDomainInference.MapDomainDisplay(infer)}。" +
+                        "已检索题库：若某技术领域已有题目且与 JD/技能描述相近，补题时会优先归入该领域而非重复建类。";
+                    var defaultDomainUi = ResolveCareerPathDefaultDomainUi(examOpts?.DomainHint, skills, jobSummary);
+                    var defaultDiffUi = MapCareerPathDifficultyHint(mergedDiffHint) is { } dl
+                        ? MapDifficultyToUi(dl)
+                        : "全部";
+
+                    var dlg = new CareerPathPracticePrepareDialog(
+                        perSkill,
+                        byDom,
+                        inferLine,
+                        examCountDefault,
+                        defaultDomainUi,
+                        defaultDiffUi)
+                    {
+                        Owner = Application.Current.MainWindow
+                    };
+                    if (dlg.ShowDialog() != true)
+                    {
+                        StatusMessage = "已取消技能包刷题。";
+                        return;
+                    }
+
+                    directDomain = MapUiToDomainOrNull(dlg.SelectedDomainUi);
+                    directDiff = dlg.SelectedDifficultyUi == "全部"
+                        ? null
+                        : MapUiToDifficultyOrNull(dlg.SelectedDifficultyUi);
+                    directCount = dlg.QuestionCount;
+                }
+                else
+                {
+                    directDomain = !string.IsNullOrWhiteSpace(examOpts?.DomainHint)
+                        ? MapUiToDomainOrNull(examOpts!.DomainHint!.Trim())
+                        : null;
+                    directDiff = MapCareerPathDifficultyHint(mergedDiffHint);
+                }
+
+                await StartExamFromCareerPathSkillsAsync(
+                        skills,
+                        jobSummary,
+                        directDiff,
+                        directDomain,
+                        directCount,
+                        true)
+                    .ConfigureAwait(true);
+                ActivateMainWindowForCareerPath();
+                return;
+            }
+
+            if (!autoProceed)
+            {
+                var r2 = MessageBox.Show(
+                    "已加载 CareerPath 技能包。\n\n是否使用 AI 推荐题目并开始刷题？（将把 skills、岗位简述与难度传入推荐模块）",
+                    "AI 推荐",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Question);
+                if (r2 != MessageBoxResult.Yes)
+                {
+                    StatusMessage = "已取消 CareerPath AI 推荐。";
+                    return;
+                }
+            }
+
+            var recommendDomainScope = !string.IsNullOrWhiteSpace(examOpts?.DomainHint)
+                ? MapUiToDomainOrNull(examOpts!.DomainHint!.Trim())
+                : null;
+
+            SetAiMainOutputLoading(true, "CareerPath：正在请求 AI 题目推荐…");
+            CancellationTokenSource? cts = null;
+            try
+            {
+                cts = new CancellationTokenSource();
+                RegisterAiCancellation(cts);
+                var token = cts.Token;
+                var request = new QuestionRecommendationRequest
+                {
+                    ExternalSkillHints = skills,
+                    ExternalJobSummary = string.IsNullOrWhiteSpace(jobSummary) ? null : jobSummary,
+                    ExternalDifficultyHint = string.IsNullOrWhiteSpace(mergedDiffHint) ? null : mergedDiffHint,
+                    DomainScope = recommendDomainScope
+                };
+                var dto = await _recommendation
+                    .RecommendAsync(DatabaseInitializer.DemoUserId, request, token)
+                    .ConfigureAwait(true);
+                if (token.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                _recommendedQuestionIds = dto.RecommendedQuestionIds.ToList();
+                AiOutputText = await BuildRecommendationDisplayTextAsync(dto, token).ConfigureAwait(true);
+                if (token.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                ApplyAiTraceToUi("题目推荐");
+                StatusMessage = $"CareerPath：AI 推荐已生成（{_recommendedQuestionIds.Count} 题）。";
+            }
+            catch (OperationCanceledException)
+            {
+                StatusMessage = "已取消 CareerPath AI 推荐。";
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "CareerPath AI 推荐失败");
+                AiOutputText = "题目推荐失败：" + FormatExceptionMessage(ex);
+                StatusMessage = "CareerPath AI 推荐失败。";
+                MessageBox.Show(
+                    "AI 推荐失败：" + FormatExceptionMessage(ex),
+                    "CareerPath",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+            finally
+            {
+                if (cts is not null)
+                {
+                    UnregisterAiCancellation(cts);
+                }
+
+                SetAiMainOutputLoading(false);
+            }
+
+            if (_recommendedQuestionIds.Count == 0)
+            {
+                StatusMessage = "CareerPath：AI 推荐结果为空，未开考。";
+                MessageBox.Show(
+                    "未获得推荐题目，无法开考。请检查题库或稍后重试。",
+                    "CareerPath",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+
+            if (autoProceed)
+            {
+                await StartExamWithRecommendedQuestionsAsync().ConfigureAwait(true);
+                ActivateMainWindowForCareerPath();
+            }
+            else
+            {
+                var r3 = MessageBox.Show(
+                    $"AI 已推荐 {_recommendedQuestionIds.Count} 道题目，是否开始刷题？",
+                    "CareerPath",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Question);
+                if (r3 == MessageBoxResult.Yes)
+                {
+                    await StartExamWithRecommendedQuestionsAsync().ConfigureAwait(true);
+                    ActivateMainWindowForCareerPath();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "CareerPath 启动流程失败");
+            MessageBox.Show(
+                "处理技能包时出错：" + FormatExceptionMessage(ex),
+                "CareerPath 技能包",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        finally
+        {
+            ActivateMainWindowForCareerPath();
+            _careerPathImportGate.Release();
+        }
+    }
+
+    private async Task StartExamFromCareerPathSkillsAsync(
+        IReadOnlyList<string> skills,
+        string? jobSummary,
+        DifficultyLevel? difficultyFilter,
+        QuestionDomain? domainScope,
+        int questionCount,
+        bool allowGenerateWhenEmpty = true)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(false);
+        var query = db.Questions.AsNoTracking().Where(x => x.IsEnabled);
+        if (domainScope is { } dom)
+        {
+            query = query.Where(x => x.Domain == dom);
+        }
+
+        if (difficultyFilter is { } d)
+        {
+            query = query.Where(x => x.Difficulty == d);
+        }
+
+        var pool = await query.ToListAsync().ConfigureAwait(false);
+        var matched = pool.Where(q => CareerPathQuestionFilter.MatchesAnySkill(q, skills)).ToList();
+        if (matched.Count == 0)
+        {
+            if (allowGenerateWhenEmpty)
+            {
+                var generated = await ConfirmAndGenerateCareerPathQuestionsAsync(
+                    skills,
+                    jobSummary,
+                    difficultyFilter,
+                    domainScope).ConfigureAwait(true);
+                if (generated)
+                {
+                    await StartExamFromCareerPathSkillsAsync(
+                        skills,
+                        jobSummary,
+                        difficultyFilter,
+                        domainScope,
+                        questionCount,
+                        allowGenerateWhenEmpty: false).ConfigureAwait(true);
+                    return;
+                }
+
+                return;
+            }
+
+            MessageBox.Show(
+                "题库中没有与技能包知识点匹配的题目。请为题库补充带相应 TopicTags、KnowledgeTags 或主知识点的题目。",
+                "提示",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            StatusMessage = "技能包知识点与题库无匹配，未开考。";
+            return;
+        }
+
+        var requested = Math.Clamp(questionCount, 1, 50);
+        var paper = BuildRandomPaperWithoutDuplicateIds(matched, requested);
+        if (paper.Count == 0)
+        {
+            StatusMessage = "可用题目不足，无法组卷。";
+            return;
+        }
+
+        _examFromWrongBookRedoSession = false;
+        _examQuestions.Clear();
+        _examQuestions.AddRange(paper);
+        _answersByDisplayIndex.Clear();
+        _examSessionId = Guid.NewGuid();
+
+        ExamRemainingSeconds = Math.Clamp(ExamMinutes, 1, 180) * 60;
+        IsExamRunning = true;
+        ExamDisplayIndex = 1;
+        ExamUserAnswer = string.Empty;
+        _examTimer.Start();
+
+        RenderCurrentExamQuestion();
+        var diffNote = difficultyFilter is { } df ? $" 难度筛选：{MapDifficultyToUi(df)}。" : string.Empty;
+        var shortfall = paper.Count < requested
+            ? $" 设定 {requested} 题，匹配池仅 {paper.Count} 题，已按最大可用题量开考。"
+            : string.Empty;
+        StatusMessage =
+            $"CareerPath 刷题已开始：{paper.Count} 题（按技能包知识点匹配、随机抽样）。{diffNote}{shortfall}";
+        ExamStarted?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// 当 CareerPath 传入的知识点在题库中无匹配题时，先给用户一个明确的“是否生成 20 道题”选项，再进入详细参数面板。
+    /// </summary>
+    private async Task<bool> ConfirmAndGenerateCareerPathQuestionsAsync(
+        IReadOnlyList<string> skills,
+        string? jobSummary,
+        DifficultyLevel? difficultyFilter,
+        QuestionDomain? preferredDomain)
+    {
+        var confirm = await Application.Current.Dispatcher.InvokeAsync(() =>
+            MessageBox.Show(
+                $"题库中没有与当前知识点匹配的题目。{Environment.NewLine}{Environment.NewLine}" +
+                $"是否生成 {CareerPathMissingQuestionDefaultCount} 道对应知识点的题并保存到题库？{Environment.NewLine}" +
+                "点击“是”后仍可调整题目数量、题型和难度；系统会先检索最接近的领域，若该领域暂无题目，则写入该领域首批题目并按知识点归类。",
+                "CareerPath 补题",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question));
+
+        if (confirm != MessageBoxResult.Yes)
+        {
+            StatusMessage = "已取消生成对应知识点题目，未开考。";
+            return false;
+        }
+
+        return await PromptCareerPathQuestionGenerationAsync(
+            skills,
+            jobSummary,
+            difficultyFilter,
+            preferredDomain,
+            CareerPathMissingQuestionDefaultCount).ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// 准备对话框默认选中的领域：优先解析 CareerPath 传入的 <c>domain_hint</c>，否则按技能/JD 规则推断。
+    /// </summary>
+    private static string ResolveCareerPathDefaultDomainUi(
+        string? domainHint,
+        IReadOnlyList<string> skills,
+        string? jobSummary)
+    {
+        if (!string.IsNullOrWhiteSpace(domainHint))
+        {
+            var t = domainHint.Trim();
+            var mapped = MapUiToDomainOrNull(t);
+            if (mapped is { } d)
+            {
+                return MapDomainToUi(d);
+            }
+
+            foreach (var opt in CareerPathPracticePrepareDialog.GetDomainUiOptionsForFilter())
+            {
+                if (string.Equals(opt, t, StringComparison.OrdinalIgnoreCase))
+                {
+                    return opt;
+                }
+            }
+        }
+
+        var inferred = CareerPathDomainInference.InferDomain(skills, jobSummary);
+        return MapDomainToUi(inferred);
+    }
+
+    private static DifficultyLevel? MapCareerPathDifficultyHint(string? hint)
+    {
+        if (string.IsNullOrWhiteSpace(hint))
+        {
+            return null;
+        }
+
+        var s = hint.Trim().ToLowerInvariant();
+        if (s.Contains("难", StringComparison.Ordinal) || s == "hard")
+        {
+            return DifficultyLevel.Hard;
+        }
+
+        if (s.Contains("中", StringComparison.Ordinal) || s == "medium")
+        {
+            return DifficultyLevel.Medium;
+        }
+
+        if (s.Contains("简", StringComparison.Ordinal) || s == "easy")
+        {
+            return DifficultyLevel.Easy;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// 由外部（如浏览器/实习通）拉起时，主窗口可能不在前台；在 CareerPath 流程中激活窗口以减少 MessageBox 被遮挡问题（与 <c>--auto</c> 配合更佳）。
+    /// </summary>
+private static void ActivateMainWindowForCareerPath()
+    {
+        var w = Application.Current?.MainWindow;
+        if (w is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!w.IsVisible)
+            {
+                w.Show();
+            }
+
+            if (w.WindowState == WindowState.Minimized)
+            {
+                w.WindowState = WindowState.Normal;
+            }
+
+            w.ShowInTaskbar = true;
+            w.Topmost = true;
+            w.Activate();
+            w.BringIntoView();
+            w.Focus();
+            var handle = new WindowInteropHelper(w).Handle;
+            if (handle != IntPtr.Zero)
+            {
+                ShowWindow(handle, ShowWindowRestore);
+                var foregroundHandle = GetForegroundWindow();
+                var currentThreadId = GetCurrentThreadId();
+                var foregroundThreadId = foregroundHandle == IntPtr.Zero
+                    ? 0u
+                    : GetWindowThreadProcessId(foregroundHandle, IntPtr.Zero);
+                var attached = foregroundThreadId != 0 && foregroundThreadId != currentThreadId;
+                try
+                {
+                    if (attached)
+                    {
+                        AttachThreadInput(currentThreadId, foregroundThreadId, true);
+                    }
+
+                    BringWindowToTop(handle);
+                    SetWindowPos(handle, TopMostWindowHandle, 0, 0, 0, 0, SetWindowPosFlagsNoMoveOrSize | SetWindowPosFlagsShowWindow);
+                    SetWindowPos(handle, NotTopMostWindowHandle, 0, 0, 0, 0, SetWindowPosFlagsNoMoveOrSize | SetWindowPosFlagsShowWindow);
+                    SetForegroundWindow(handle);
+                }
+                finally
+                {
+                    if (attached)
+                    {
+                        AttachThreadInput(currentThreadId, foregroundThreadId, false);
+                    }
+                }
+            }
+
+            w.Topmost = false;
+        }
+        catch
+        {
+            // 忽略前台激活失败（最小化、权限等边界情况）
+        }
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    private static extern bool BringWindowToTop(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetWindowPos(
+        IntPtr hWnd,
+        IntPtr hWndInsertAfter,
+        int x,
+        int y,
+        int cx,
+        int cy,
+        uint uFlags);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr processId);
+
+    [DllImport("user32.dll")]
+    private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+    private const int ShowWindowRestore = 9;
+    private const uint SetWindowPosFlagsNoMoveOrSize = 0x0001 | 0x0002;
+    private const uint SetWindowPosFlagsShowWindow = 0x0040;
+    private static readonly IntPtr TopMostWindowHandle = new(-1);
+    private static readonly IntPtr NotTopMostWindowHandle = new(-2);
+
+    #endregion
+
     /// <summary>
     /// 触发 AI 学习计划生成并展示结果。
     /// </summary>
@@ -2382,39 +3019,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             await using var db = await _dbFactory.CreateDbContextAsync(token).ConfigureAwait(false);
             var userId = DatabaseInitializer.DemoUserId;
 
-            var total = await db.AnswerRecords.CountAsync(x => x.UserId == userId, token).ConfigureAwait(false);
-            var correct = await db.AnswerRecords.CountAsync(x => x.UserId == userId && x.IsCorrect, token).ConfigureAwait(false);
-            var wrongCount = await db.WrongBookEntries.CountAsync(x => x.UserId == userId, token).ConfigureAwait(false);
-
-            var weakTags = await db.WrongBookEntries.AsNoTracking()
-                .Where(w => w.UserId == userId)
-                .Join(db.Questions.AsNoTracking(), w => w.QuestionId, q => q.Id, (_, q) => q.KnowledgeTags)
-                .ToListAsync(token)
-                .ConfigureAwait(false);
-
-            var tagHistogram = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            foreach (var tags in weakTags)
-            {
-                foreach (var t in tags.Split(new[] { ',', '，', ';', '；' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                {
-                    tagHistogram[t] = tagHistogram.TryGetValue(t, out var c) ? c + 1 : 1;
-                }
-            }
-
-            var top = tagHistogram
-                .OrderByDescending(kv => kv.Value)
-                .Take(5)
-                .Select(kv => kv.Key)
-                .ToList();
-
-            var summary = new UserPerformanceSummary
-            {
-                UserId = userId,
-                TotalAttempts = total,
-                CorrectAttempts = correct,
-                WrongBookCount = wrongCount,
-                WeakTags = top
-            };
+            var summary = await UserPerformanceSummaryFactory.CreateAsync(db, userId, token).ConfigureAwait(false);
 
             Ui(() => StudyPlanOutputBusyMessage = "正在调用 AI 生成学习计划，请稍候…");
             var plan = await _studyPlan.GeneratePlanAsync(summary, token).ConfigureAwait(false);
@@ -2424,7 +3029,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             }
 
             StudyPlanText =
-                $"{plan.Title}\r\n阶段：{plan.PhaseDays} 天；每日：{plan.DailyQuestionQuota} 题。\r\n重点：{string.Join("、", plan.FocusKnowledgeTags)}\r\n说明：{plan.Notes}";
+                $"{plan.Title}\r\n阶段：{plan.PhaseDays} 天；每日：{plan.DailyQuestionQuota} 题。\r\n模块重点：{string.Join("、", plan.FocusKnowledgeTags)}\r\n知识点：{string.Join("、", plan.FocusKnowledgePoints)}\r\n说明：{plan.Notes}";
             ApplyAiTraceToUi("学习计划");
             StatusMessage = "学习计划已生成。";
         }
@@ -3035,6 +3640,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
                 : (string.IsNullOrWhiteSpace(q.TopicKeywords) ? string.Empty : q.TopicKeywords.Trim());
             q.Stem = q.Stem.Trim();
             q.StandardAnswer = q.StandardAnswer.Trim();
+            q.PrimaryKnowledgePoint = NormalizePrimaryKnowledgePoint(q.PrimaryKnowledgePoint, q.KnowledgeTags);
             q.IsEnabled = true;
             q.CreatedAtUtc = DateTime.UtcNow;
 
@@ -3052,6 +3658,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
                 EditorStandardAnswer = q.StandardAnswer;
                 EditorOptionsJson = string.IsNullOrWhiteSpace(q.OptionsJson) ? string.Empty : q.OptionsJson;
                 EditorKnowledgeTags = string.IsNullOrWhiteSpace(q.KnowledgeTags) ? editorDomainDisplay : q.KnowledgeTags;
+                EditorPrimaryKnowledgePoint = q.PrimaryKnowledgePoint ?? string.Empty;
                 if (sendHints && !string.IsNullOrEmpty(tags))
                 {
                     EditorTopicTags = tags;
@@ -3140,6 +3747,323 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// 当 CareerPath 技能点在题库中无匹配题时，提示用户选择生成参数并自动补充一批对应题目。
+    /// </summary>
+    private async Task<bool> PromptCareerPathQuestionGenerationAsync(
+        IReadOnlyList<string> skills,
+        string? jobSummary,
+        DifficultyLevel? difficultyFilter,
+        QuestionDomain? preferredDomain,
+        int defaultGenerationCount)
+    {
+        var normalizedSkills = CareerPathDomainInference.NormalizeSkillHints(skills, 12);
+        var resolvedDomain = await CareerPathDomainResolution
+            .ResolveDomainForGenerationAsync(_dbFactory, normalizedSkills, jobSummary)
+            .ConfigureAwait(false);
+
+        var domainChoices = CareerPathPracticePrepareDialog.GetDomainUiOptionsForFilter()
+            .Where(x => x != "全部")
+            .ToList();
+
+        var defaultDisplay = preferredDomain is { } pd
+            ? MapDomainToUi(pd)
+            : MapDomainToUi(resolvedDomain);
+        if (!domainChoices.Contains(defaultDisplay))
+        {
+            defaultDisplay = domainChoices.FirstOrDefault() ?? "未分类";
+        }
+
+        var chosenEnum = MapUiToDomain(defaultDisplay);
+        var hasDomainQuestions = false;
+        await using (var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(false))
+        {
+            hasDomainQuestions = await db.Questions
+                .AsNoTracking()
+                .AnyAsync(x => x.IsEnabled && x.Domain == chosenEnum)
+                .ConfigureAwait(false);
+        }
+
+        var scopeNote = preferredDomain is { } pref && pref != resolvedDomain
+            ? $" 您筛选的领域为「{MapDomainToUi(pref)}」，默认已选中；系统推断为「{MapDomainToUi(resolvedDomain)}」，可在下拉中并入相近领域。"
+            : $" 系统结合题库已有领域推断为「{MapDomainToUi(resolvedDomain)}」，避免重复建类。";
+        var domainStateText =
+            scopeNote +
+            (hasDomainQuestions
+                ? " 当前所选领域在题库中已有题目，新题将并入并按知识点归类。"
+                : " 当前所选领域尚无题目，将写入该领域首批题目，相当于创建该领域并按知识点归类。");
+
+        var dialogResult = await Application.Current.Dispatcher.InvokeAsync(() =>
+        {
+            var dialog = new CareerPathGenerateQuestionsDialog(
+                domainChoices,
+                defaultDisplay,
+                domainStateText,
+                normalizedSkills,
+                Math.Clamp(defaultGenerationCount, 1, 96))
+            {
+                Owner = Application.Current.MainWindow
+            };
+            return (Result: dialog.ShowDialog(), Dialog: dialog);
+        });
+        if (dialogResult.Result != true)
+        {
+            StatusMessage = "已取消 CareerPath 补题。";
+            return false;
+        }
+
+        var dialog = dialogResult.Dialog;
+        var selectedDifficulty = dialog.SelectedDifficulty == "全部"
+            ? difficultyFilter
+            : MapUiToDifficultyOrNull(dialog.SelectedDifficulty);
+        var knowledgeTagsHint = CareerPathDomainInference.BuildKnowledgeTagsHint(normalizedSkills, 10);
+        var domainForGeneration = MapUiToDomain(dialog.SelectedDomainDisplay);
+        var topicTagsHint = CareerPathDomainInference.BuildTopicTagsHint(domainForGeneration, normalizedSkills);
+        var keywordsHint = string.Join("；", CareerPathDomainInference.NormalizeSkillHints(normalizedSkills, 12));
+        var hints = new QuestionBankGenerationHints
+        {
+            RequiredDifficulty = selectedDifficulty,
+            RandomizeDifficultyInBatch = selectedDifficulty is null,
+            KnowledgeTagsHint = knowledgeTagsHint,
+            TopicTagsHint = topicTagsHint,
+            TopicKeywordsHint = string.IsNullOrWhiteSpace(jobSummary)
+                ? keywordsHint
+                : $"{keywordsHint}；{jobSummary.Trim()}"
+        };
+
+        var generated = await ExecuteBankAiGenerationAsync(new BankAiGenerationSessionOptions
+        {
+            Domain = domainForGeneration,
+            DomainDisplayName = dialog.SelectedDomainDisplay.Trim(),
+            TemplateType = MapUiToType(dialog.SelectedQuestionType),
+            RequestedCount = dialog.GenerationCount,
+            Hints = hints,
+            OperationTitle = "CareerPath 补题",
+            CompletionDialogTitle = "CareerPath 补题",
+            ShowCompletionDialog = false
+        }).ConfigureAwait(false);
+
+        if (generated.Count == 0)
+        {
+            Ui(() => MessageBox.Show(
+                "没有成功生成可入库题目，请检查 AI 日志或稍后重试。",
+                "CareerPath 补题",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning));
+            StatusMessage = "CareerPath 补题未写入题目。";
+            return false;
+        }
+
+        StatusMessage = $"CareerPath 已补充 {generated.Count} 道题目，正在重新匹配知识点。";
+        return true;
+    }
+
+    /// <summary>
+    /// 统一执行批量 AI 出题入库流程，支持题库管理页与 CareerPath 缺题补题共用同一批处理与校验逻辑。
+    /// </summary>
+    private async Task<IReadOnlyList<Question>> ExecuteBankAiGenerationAsync(BankAiGenerationSessionOptions options)
+    {
+        Ui(() =>
+        {
+            IsBankAiGenerating = true;
+            BankAiProgressPhase = "准备发送…";
+        });
+        var aiCts = new CancellationTokenSource();
+        RegisterAiCancellation(aiCts);
+        var token = aiCts.Token;
+        var savedQuestions = new List<Question>();
+        try
+        {
+            var totalRequested = Math.Clamp(options.RequestedCount, 1, BankAiGenerationMaxTotal);
+            PushBankAiProgress(totalRequested, 0, false);
+
+            AppendAiLog(
+                $"{options.OperationTitle}：领域={options.DomainDisplayName}，题型={MapTypeToUi(options.TemplateType)}，" +
+                $"数量={totalRequested}，随机难度={options.Hints.RandomizeDifficultyInBatch}");
+            SetAiPipeline("正在发送", options.OperationTitle);
+            await Task.Delay(60, token).ConfigureAwait(false);
+
+            if (totalRequested != options.RequestedCount)
+            {
+                AppendAiLog($"{options.OperationTitle}：请求数量已从 {options.RequestedCount} 调整为上限 {BankAiGenerationMaxTotal}。");
+            }
+
+            var allErrors = new List<string>();
+            string? lastSnippet = null;
+            var minBatches = (int)Math.Ceiling(totalRequested / (double)BankAiGenerationChunkSize);
+            var maxAttempts = minBatches + 10;
+
+            for (var attempt = 0; attempt < maxAttempts && savedQuestions.Count < totalRequested; attempt++)
+            {
+                var chunk = Math.Min(BankAiGenerationChunkSize, totalRequested - savedQuestions.Count);
+                if (chunk <= 0)
+                {
+                    break;
+                }
+
+                Ui(() => BankAiProgressPhase =
+                    $"第 {attempt + 1} 批（每批≤{BankAiGenerationChunkSize} 题）：请求 {chunk} 题，已入库 {savedQuestions.Count}/{totalRequested}…");
+                PushBankAiProgress(totalRequested, savedQuestions.Count, true);
+                await Task.Delay(40, token).ConfigureAwait(false);
+
+                var result = await _questionBankAi
+                    .GenerateQuestionsAsync(
+                        options.Domain,
+                        options.DomainDisplayName,
+                        options.TemplateType,
+                        chunk,
+                        options.Hints,
+                        token)
+                    .ConfigureAwait(false);
+
+                allErrors.AddRange(result.Errors);
+                if (!string.IsNullOrWhiteSpace(result.RawSnippet))
+                {
+                    lastSnippet = result.RawSnippet;
+                }
+
+                if (result.Questions.Count > 0)
+                {
+                    foreach (var item in result.Questions)
+                    {
+                        item.PrimaryKnowledgePoint = NormalizePrimaryKnowledgePoint(item.PrimaryKnowledgePoint, item.KnowledgeTags);
+                    }
+
+                    savedQuestions.AddRange(result.Questions);
+                    await using (var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(false))
+                    {
+                        db.Questions.AddRange(result.Questions);
+                        await db.SaveChangesAsync().ConfigureAwait(false);
+                    }
+
+                    AppendAiLog(
+                        $"{options.OperationTitle}第 {attempt + 1} 批：本批入库 {result.Questions.Count} 题，累计 {savedQuestions.Count}/{totalRequested}。");
+                }
+                else
+                {
+                    AppendAiLog(
+                        $"{options.OperationTitle}第 {attempt + 1} 批：未得到有效题目（本批校验失败 {result.Errors.Count} 条）。");
+                }
+
+                Ui(() => BankAiProgressPhase = $"写入完成一批，累计 {savedQuestions.Count}/{totalRequested}…");
+                PushBankAiProgress(totalRequested, savedQuestions.Count, false);
+                await Task.Delay(50, token).ConfigureAwait(false);
+            }
+
+            ApplyAiTraceToUi(options.OperationTitle);
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"目标 {totalRequested} 题，实际入库 {savedQuestions.Count} 题（分多批请求，每批最多 {BankAiGenerationChunkSize} 题）。");
+            if (savedQuestions.Count < totalRequested)
+            {
+                sb.AppendLine("提示：未完全达到目标题量，可能因部分批次校验未通过或达到重试上限。");
+            }
+
+            if (allErrors.Count > 0)
+            {
+                sb.AppendLine($"各批校验失败合计 {allErrors.Count} 条（摘录前 12 条）：");
+                foreach (var error in allErrors.Take(12))
+                {
+                    sb.AppendLine(" - " + error);
+                }
+
+                if (allErrors.Count > 12)
+                {
+                    sb.AppendLine($" - …（其余 {allErrors.Count - 12} 条略）");
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(lastSnippet))
+            {
+                sb.AppendLine();
+                sb.AppendLine("最后一批模型输出片段（截断）：");
+                sb.AppendLine(lastSnippet);
+            }
+
+            var summary = sb.ToString().TrimEnd();
+            AppendAiLog($"{options.OperationTitle}详情：" + Environment.NewLine + summary);
+            StatusMessage = $"{options.OperationTitle}完成：已入库 {savedQuestions.Count} 题（目标 {totalRequested}）。";
+            Ui(() =>
+            {
+                SetAiPipeline("成功", options.OperationTitle);
+                if (!options.ShowCompletionDialog)
+                {
+                    return;
+                }
+
+                string msg;
+                if (savedQuestions.Count == 0)
+                {
+                    msg = "未写入任何题目，详情请查看下方 AI 日志。";
+                }
+                else if (savedQuestions.Count < totalRequested)
+                {
+                    msg = $"已入库 {savedQuestions.Count} 题（目标 {totalRequested}）。未完全达标时请查看 AI 日志中的校验说明。";
+                }
+                else
+                {
+                    msg = $"已成功生成并入库 {savedQuestions.Count} 题。";
+                }
+
+                MessageBox.Show(
+                    msg,
+                    options.CompletionDialogTitle,
+                    MessageBoxButton.OK,
+                    savedQuestions.Count > 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
+            });
+
+            if (savedQuestions.Count > 0)
+            {
+                await RefreshBankAsync().ConfigureAwait(false);
+            }
+
+            return savedQuestions;
+        }
+        catch (OperationCanceledException)
+        {
+            AppendAiLog($"{options.OperationTitle}：用户已取消");
+            SetAiPipeline("已取消", string.Empty);
+            StatusMessage = $"已取消 {options.OperationTitle}（已入库 {savedQuestions.Count} 题将保留）。";
+            return savedQuestions;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "{OperationTitle}失败", options.OperationTitle);
+            SetAiPipeline("失败", FormatExceptionMessage(ex));
+            AppendAiLog($"{options.OperationTitle}：失败 — " + FormatExceptionMessage(ex));
+            StatusMessage = $"{options.OperationTitle}失败：" + ex.Message;
+            var partial = savedQuestions.Count > 0
+                ? $"\n\n此前批次已成功入库 {savedQuestions.Count} 题，数据已保留。"
+                : string.Empty;
+            MessageBox.Show(
+                $"{options.OperationTitle}失败：" + FormatExceptionMessage(ex) + partial,
+                "错误",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            if (savedQuestions.Count > 0)
+            {
+                await RefreshBankAsync().ConfigureAwait(false);
+            }
+
+            return savedQuestions;
+        }
+        finally
+        {
+            UnregisterAiCancellation(aiCts);
+            Ui(() =>
+            {
+                IsBankAiGenerating = false;
+                BankAiProgressPhase = string.Empty;
+                BankAiBatchRequestActive = false;
+                BankAiProgressTarget = 0;
+                BankAiProgressGenerated = 0;
+                BankAiProgressRemaining = 0;
+                BankAiProgressPercent = 0;
+                BankAiProgressStatsLine = string.Empty;
+            });
+        }
+    }
+
+    /// <summary>
     /// 调用 AI：按「刷新题库」旁筛选的领域、难度、题型批量生成并入库（题型为「全部」时用 AI 模板决定题型）；难度为「全部」时各批内随机简单/中等/困难。
     /// 多题时按 <see cref="BankAiGenerationChunkSize"/> 分多批调用模型，每批成功后立即入库，降低单次超时风险。
     /// </summary>
@@ -3178,179 +4102,17 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
             return;
         }
 
-        Ui(() =>
+        await ExecuteBankAiGenerationAsync(new BankAiGenerationSessionOptions
         {
-            IsBankAiGenerating = true;
-            BankAiProgressPhase = "准备发送…";
-        });
-        var aiCts = new CancellationTokenSource();
-        RegisterAiCancellation(aiCts);
-        var token = aiCts.Token;
-        var savedQuestions = new List<Question>();
-        try
-        {
-            var totalRequested = Math.Clamp(BankAiGenCount, 1, BankAiGenerationMaxTotal);
-            PushBankAiProgress(totalRequested, 0, false);
-
-            AppendAiLog(
-                $"题库 AI 生成：筛选 领域={SelectedDomainFilter} 题型={SelectedTypeFilter} 难度={SelectedDifficultyFilter}；" +
-                $"实际 Domain={domain} Type={templateType} RandomDifficultyBatch={(diffOrNull is null)}");
-            SetAiPipeline("正在发送", "题库 AI 生成");
-            await Task.Delay(60, token).ConfigureAwait(false);
-
-            if (totalRequested != BankAiGenCount)
-            {
-                AppendAiLog($"题库 AI 生成：请求数量已从 {BankAiGenCount} 调整为上限 {BankAiGenerationMaxTotal}。");
-            }
-
-            var allErrors = new List<string>();
-            string? lastSnippet = null;
-            var minBatches = (int)Math.Ceiling(totalRequested / (double)BankAiGenerationChunkSize);
-            var maxAttempts = minBatches + 10;
-
-            for (var attempt = 0; attempt < maxAttempts && savedQuestions.Count < totalRequested; attempt++)
-            {
-                var chunk = Math.Min(BankAiGenerationChunkSize, totalRequested - savedQuestions.Count);
-                if (chunk <= 0)
-                {
-                    break;
-                }
-
-                Ui(() => BankAiProgressPhase =
-                    $"第 {attempt + 1} 批（每批≤{BankAiGenerationChunkSize} 题）：请求 {chunk} 题，已入库 {savedQuestions.Count}/{totalRequested}…");
-                PushBankAiProgress(totalRequested, savedQuestions.Count, true);
-                await Task.Delay(40, token).ConfigureAwait(false);
-
-                var result = await _questionBankAi
-                    .GenerateQuestionsAsync(domain, domainDisplay, templateType, chunk, bankAiHints, token)
-                    .ConfigureAwait(false);
-
-                allErrors.AddRange(result.Errors);
-                if (!string.IsNullOrWhiteSpace(result.RawSnippet))
-                {
-                    lastSnippet = result.RawSnippet;
-                }
-
-                if (result.Questions.Count > 0)
-                {
-                    savedQuestions.AddRange(result.Questions);
-                    await using (var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(false))
-                    {
-                        db.Questions.AddRange(result.Questions);
-                        await db.SaveChangesAsync().ConfigureAwait(false);
-                    }
-
-                    AppendAiLog($"题库 AI 生成第 {attempt + 1} 批：本批入库 {result.Questions.Count} 题，累计 {savedQuestions.Count}/{totalRequested}。");
-                }
-                else
-                {
-                    AppendAiLog(
-                        $"题库 AI 生成第 {attempt + 1} 批：未得到有效题目（本批校验失败 {result.Errors.Count} 条）。");
-                }
-
-                Ui(() => BankAiProgressPhase = $"写入完成一批，累计 {savedQuestions.Count}/{totalRequested}…");
-                PushBankAiProgress(totalRequested, savedQuestions.Count, false);
-                await Task.Delay(50, token).ConfigureAwait(false);
-            }
-
-            ApplyAiTraceToUi("题库 AI 生成");
-
-            var sb = new StringBuilder();
-            sb.AppendLine($"目标 {totalRequested} 题，实际入库 {savedQuestions.Count} 题（分多批请求，每批最多 {BankAiGenerationChunkSize} 题）。");
-            if (savedQuestions.Count < totalRequested)
-            {
-                sb.AppendLine("提示：未完全达到目标题量，可能因部分批次校验未通过或达到重试上限。");
-            }
-
-            if (allErrors.Count > 0)
-            {
-                sb.AppendLine($"各批校验失败合计 {allErrors.Count} 条（摘录前 12 条）：");
-                foreach (var e in allErrors.Take(12))
-                {
-                    sb.AppendLine(" - " + e);
-                }
-
-                if (allErrors.Count > 12)
-                {
-                    sb.AppendLine($" - …（其余 {allErrors.Count - 12} 条略）");
-                }
-            }
-
-            if (!string.IsNullOrWhiteSpace(lastSnippet))
-            {
-                sb.AppendLine();
-                sb.AppendLine("最后一批模型输出片段（截断）：");
-                sb.AppendLine(lastSnippet);
-            }
-
-            var summary = sb.ToString().TrimEnd();
-            AppendAiLog("题库 AI 生成详情：" + Environment.NewLine + summary);
-            StatusMessage = $"AI 批量出题完成：已入库 {savedQuestions.Count} 题（目标 {totalRequested}）。";
-            Ui(() =>
-            {
-                SetAiPipeline("成功", "题库 AI 生成");
-                string msg;
-                if (savedQuestions.Count == 0)
-                {
-                    msg = "未写入任何题目，详情请查看下方 AI 日志。";
-                }
-                else if (savedQuestions.Count < totalRequested)
-                {
-                    msg = $"已入库 {savedQuestions.Count} 题（目标 {totalRequested}）。未完全达标时请查看 AI 日志中的校验说明。";
-                }
-                else
-                {
-                    msg = $"已成功生成并入库 {savedQuestions.Count} 题。";
-                }
-
-                MessageBox.Show(
-                    msg,
-                    "AI 出题",
-                    MessageBoxButton.OK,
-                    savedQuestions.Count > 0 ? MessageBoxImage.Information : MessageBoxImage.Warning);
-            });
-
-            if (savedQuestions.Count > 0)
-            {
-                await RefreshBankAsync().ConfigureAwait(false);
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            AppendAiLog("题库 AI 生成：用户已取消");
-            SetAiPipeline("已取消", string.Empty);
-            StatusMessage = $"已取消 AI 批量出题（已入库 {savedQuestions.Count} 题将保留）。";
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "题库 AI 生成失败");
-            SetAiPipeline("失败", FormatExceptionMessage(ex));
-            AppendAiLog("题库 AI 生成：失败 — " + FormatExceptionMessage(ex));
-            StatusMessage = "题库 AI 生成失败：" + ex.Message;
-            var partial = savedQuestions.Count > 0
-                ? $"\n\n此前批次已成功入库 {savedQuestions.Count} 题，数据已保留。"
-                : string.Empty;
-            MessageBox.Show("题库 AI 生成失败：" + FormatExceptionMessage(ex) + partial, "错误", MessageBoxButton.OK, MessageBoxImage.Error);
-            if (savedQuestions.Count > 0)
-            {
-                await RefreshBankAsync().ConfigureAwait(false);
-            }
-        }
-        finally
-        {
-            UnregisterAiCancellation(aiCts);
-            Ui(() =>
-            {
-                IsBankAiGenerating = false;
-                BankAiProgressPhase = string.Empty;
-                BankAiBatchRequestActive = false;
-                BankAiProgressTarget = 0;
-                BankAiProgressGenerated = 0;
-                BankAiProgressRemaining = 0;
-                BankAiProgressPercent = 0;
-                BankAiProgressStatsLine = string.Empty;
-            });
-        }
+            Domain = domain,
+            DomainDisplayName = domainDisplay,
+            TemplateType = templateType,
+            RequestedCount = BankAiGenCount,
+            Hints = bankAiHints,
+            OperationTitle = "题库 AI 生成",
+            CompletionDialogTitle = "AI 出题",
+            ShowCompletionDialog = true
+        }).ConfigureAwait(false);
     }
 
     /// <summary>

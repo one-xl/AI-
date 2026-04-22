@@ -31,6 +31,7 @@ public static class QuestionSeedBuilder
                 var difficulty = (DifficultyLevel)((i + (int)domain) % 3);
                 var kind = (i - 1) % 5;
 
+                var (kpPrimary, kpCsv) = SeedKnowledgePointCatalog.BuildForSeed(domain, i);
                 switch (kind)
                 {
                     case 0:
@@ -47,7 +48,8 @@ public static class QuestionSeedBuilder
                             Stem = $"【{tag}】第{i}题（单选）：{SingleChoiceStem(domain, i)}",
                             StandardAnswer = correctLetter.ToString(),
                             OptionsJson = Opt(optionLines),
-                            KnowledgeTags = $"{tag},单选,批量种子",
+                            KnowledgeTags = kpCsv,
+                            PrimaryKnowledgePoint = kpPrimary,
                             TopicTags = topicTags,
                             TopicKeywords = topicKeywords,
                             IsEnabled = true,
@@ -68,7 +70,8 @@ public static class QuestionSeedBuilder
                             Stem = $"【{tag}】第{i}题（判断）：{TrueFalseStem(domain, i, answerTrue)}",
                             StandardAnswer = answerTrue ? "对" : "错",
                             OptionsJson = null,
-                            KnowledgeTags = $"{tag},判断,批量种子",
+                            KnowledgeTags = kpCsv,
+                            PrimaryKnowledgePoint = kpPrimary,
                             TopicTags = topicTags,
                             TopicKeywords = topicKeywords,
                             IsEnabled = true,
@@ -89,7 +92,8 @@ public static class QuestionSeedBuilder
                             Stem = $"【{tag}】第{i}题（多选）：{MultipleChoiceStem(domain, i)}",
                             StandardAnswer = multiStandard,
                             OptionsJson = Opt(multiOpts),
-                            KnowledgeTags = $"{tag},多选,批量种子",
+                            KnowledgeTags = kpCsv,
+                            PrimaryKnowledgePoint = kpPrimary,
                             TopicTags = topicTags,
                             TopicKeywords = topicKeywords,
                             IsEnabled = true,
@@ -110,7 +114,8 @@ public static class QuestionSeedBuilder
                             Stem = shortStem,
                             StandardAnswer = shortKeys,
                             OptionsJson = null,
-                            KnowledgeTags = $"{tag},简答,批量种子",
+                            KnowledgeTags = kpCsv,
+                            PrimaryKnowledgePoint = kpPrimary,
                             TopicTags = topicTags,
                             TopicKeywords = topicKeywords,
                             IsEnabled = true,
@@ -131,7 +136,8 @@ public static class QuestionSeedBuilder
                             Stem = fillStem,
                             StandardAnswer = fillRegex,
                             OptionsJson = null,
-                            KnowledgeTags = $"{tag},填空,批量种子",
+                            KnowledgeTags = kpCsv,
+                            PrimaryKnowledgePoint = kpPrimary,
                             TopicTags = topicTags,
                             TopicKeywords = topicKeywords,
                             IsEnabled = true,

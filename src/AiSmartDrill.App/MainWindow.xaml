@@ -440,9 +440,7 @@
                                      AcceptsReturn="True"
                                      VerticalScrollBarVisibility="Auto"
                                      Text="{Binding EditorStandardAnswer, UpdateSourceTrigger=PropertyChanged}" />
-                            <Label Content="知识点标签" />
-                            <TextBox Text="{Binding EditorKnowledgeTags, UpdateSourceTrigger=PropertyChanged}" />
-                            <Label Content="分类标签（逗号分隔，用于推荐）" />
+                            <Label Content="模块 / 大标签（TopicTags，逗号分隔）" />
                             <TextBlock Margin="0,0,0,4"
                                        FontSize="11"
                                        Opacity="0.8"
@@ -474,6 +472,19 @@
                                      AcceptsReturn="True"
                                      MinHeight="36"
                                      VerticalScrollBarVisibility="Auto" />
+                            <Label Content="细知识点（KnowledgeTags，逗号分隔）" />
+                            <TextBlock Margin="0,0,0,4"
+                                       FontSize="11"
+                                       Opacity="0.8"
+                                       TextWrapping="Wrap"
+                                       Text="填写可教可测的考点短语；勿重复填写领域名（领域以上方「领域」为准）。" />
+                            <TextBox Text="{Binding EditorKnowledgeTags, UpdateSourceTrigger=PropertyChanged}"
+                                     TextWrapping="Wrap"
+                                     AcceptsReturn="True"
+                                     MinHeight="36"
+                                     VerticalScrollBarVisibility="Auto" />
+                            <Label Content="主知识点（与上框中一项一致，推荐严格匹配）" />
+                            <TextBox Text="{Binding EditorPrimaryKnowledgePoint, UpdateSourceTrigger=PropertyChanged}" />
                             <Label Content="检索关键词（逗号/分号分隔）" />
                             <TextBox Text="{Binding EditorTopicKeywords, UpdateSourceTrigger=PropertyChanged}" />
                             </StackPanel>

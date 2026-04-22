@@ -57,6 +57,7 @@ public sealed class AppDbContext : DbContext
             e.Property(x => x.StandardAnswer).HasMaxLength(2000).IsRequired();
             e.Property(x => x.OptionsJson).HasMaxLength(4000);
             e.Property(x => x.KnowledgeTags).HasMaxLength(512).IsRequired();
+            e.Property(x => x.PrimaryKnowledgePoint).HasMaxLength(128).IsRequired();
             e.Property(x => x.TopicTags).HasMaxLength(512).IsRequired();
             e.Property(x => x.TopicKeywords).HasMaxLength(512).IsRequired();
             e.HasIndex(x => new { x.Type, x.Difficulty, x.IsEnabled })

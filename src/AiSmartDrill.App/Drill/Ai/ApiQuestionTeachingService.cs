@@ -4,6 +4,8 @@ using AiSmartDrill.App.Domain;
 using AiSmartDrill.App.Drill.Ai.Ark;
 using AiSmartDrill.App.Drill.Ai.Client;
 using AiSmartDrill.App.Drill.Import;
+using AiSmartDrill.App.Infrastructure;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace AiSmartDrill.App.Drill.Ai;
@@ -18,6 +20,7 @@ public sealed class ApiQuestionTeachingService : IQuestionBankAiGenerationServic
     private const int RawSnippetMaxLen = 800;
 
     private readonly IChatCompletionService _chat;
+    private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly ILogger<ApiQuestionTeachingService> _logger;
     private readonly AiCallTrace _trace;
 
@@ -25,14 +28,17 @@ public sealed class ApiQuestionTeachingService : IQuestionBankAiGenerationServic
     /// 初始化 <see cref="ApiQuestionTeachingService"/>。
     /// </summary>
     /// <param name="chatCompletionService">方舟兼容聊天完成客户端。</param>
+    /// <param name="dbFactory">题库上下文工厂（读取已有知识点短语表）。</param>
     /// <param name="logger">日志记录器。</param>
     /// <param name="trace">AI 调用轨迹（供 UI 区分云端/回退）。</param>
     public ApiQuestionTeachingService(
         IChatCompletionService chatCompletionService,
+        IDbContextFactory<AppDbContext> dbFactory,
         ILogger<ApiQuestionTeachingService> logger,
         AiCallTrace trace)
     {
         _chat = chatCompletionService;
+        _dbFactory = dbFactory;
         _logger = logger;
         _trace = trace;
     }
@@ -68,7 +74,8 @@ public sealed class ApiQuestionTeachingService : IQuestionBankAiGenerationServic
             "- Stem(string)：题干，中文，避免泄露答案。\n" +
             "- StandardAnswer(string)：客观题用选项键（单选如 A；多选如 A,C；判断题用 对 或 错）；简答题用分号分隔关键词；填空题用合法正则表达式。\n" +
             "- OptionsJson(string 或 null)：若为单选/多选，必须是 JSON 数组的字符串形式，例如 [\"选项A文本\",\"选项B文本\"]（至少 2 项）；判断/简答/填空可 null。\n" +
-            "- KnowledgeTags(string)：逗号分隔知识点标签。\n" +
+            "- KnowledgeTags(string)：逗号分隔细知识点标签；下一条用户消息会给出「当前选中领域下、按频次排序的题库已有知识点」列表时，须优先整段复用列表中的短语（字面一致或明显同义可视为复用）；仅当列表中确无合适项时才创造新短语，新短语须为该领域内的专业考查点表述，禁止混入其他学科/其他编程语言体系作为主要标签。\n" +
+            "- PrimaryKnowledgePoint(string 或 null)：须为 KnowledgeTags 中某一项的原文；可省略（系统会取 KnowledgeTags 首项）。\n" +
             "- TopicTags(string)：逗号分隔分类标签（须体现用户指定领域下的技术细分，如语法/并发/IO/网络协议/SQL 等），用于推荐筛选。\n" +
             "- TopicKeywords(string)：分号或逗号分隔检索关键词，须与题干考查的技术主题一致。\n" +
             "【领域纪律】用户会在下一条消息给出领域。所有题目的考查点必须落在该领域专业知识内；严禁把日常生活、购物、娱乐明星、体育比赛、社会新闻、家庭故事等作为题干主体或主要考查对象（最多允许一句极短类比，且设问仍须考专业点）。若用户领域为「未分类」，仍只出计算机与信息技术相关题，禁止纯生活常识题。";
@@ -116,9 +123,38 @@ public sealed class ApiQuestionTeachingService : IQuestionBankAiGenerationServic
             userBuilder.AppendLine("TopicTags 须覆盖或紧密关联以下分类要点：" + hints.TopicTagsHint.Trim());
         }
 
+        if (!string.IsNullOrWhiteSpace(hints?.KnowledgeTagsHint))
+        {
+            userBuilder.AppendLine("KnowledgeTags 与 PrimaryKnowledgePoint 须优先围绕以下知识点短语展开：" + hints.KnowledgeTagsHint.Trim());
+        }
+
         if (!string.IsNullOrWhiteSpace(hints?.TopicKeywordsHint))
         {
             userBuilder.AppendLine("题干与 TopicKeywords 须贴近以下关键词方向：" + hints.TopicKeywordsHint.Trim());
+        }
+
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        const int catalogAlignPool = 200;
+        var fullKpCatalog = await KnowledgePointCatalogQuery.LoadOrderedByFrequencyAsync(
+                db,
+                domain,
+                catalogAlignPool,
+                cancellationToken)
+            .ConfigureAwait(false);
+        var kpCatalogForPrompt = fullKpCatalog.Count <= KnowledgePointCatalogQuery.DefaultPromptCatalogLimit
+            ? fullKpCatalog
+            : fullKpCatalog.Take(KnowledgePointCatalogQuery.DefaultPromptCatalogLimit).ToList();
+        if (kpCatalogForPrompt.Count > 0)
+        {
+            userBuilder.AppendLine(
+                "【题库已有知识点短语（仅当前选中领域 " + domain + " / " + domainDisplayName +
+                "，按频次排序；请优先在 KnowledgeTags 中整段复用；无合适项再创新，新标签须明显属于该领域）】" +
+                string.Join("、", kpCatalogForPrompt));
+        }
+        else
+        {
+            userBuilder.AppendLine(
+                "【题库已有知识点短语】当前领域暂无已入库记录，可自行命名新知识点，须为该领域专业考查点且与题干强相关。");
         }
 
         var user = userBuilder.ToString().TrimEnd();
@@ -170,7 +206,9 @@ public sealed class ApiQuestionTeachingService : IQuestionBankAiGenerationServic
                 continue;
             }
 
-            ok.Add(ConvertDtoToQuestion(dto!, domain));
+            var q = ConvertDtoToQuestion(dto!, domain);
+            KnowledgePointCatalogQuery.AlignQuestionKnowledgeFields(q, fullKpCatalog);
+            ok.Add(q);
         }
 
         _trace.Set(errors.Count == 0 && ok.Count > 0 ? "bank-gen:ark" : "bank-gen:ark+partial", true);
@@ -350,6 +388,9 @@ public sealed class ApiQuestionTeachingService : IQuestionBankAiGenerationServic
             StandardAnswer = dto.StandardAnswer!.Trim(),
             OptionsJson = string.IsNullOrWhiteSpace(dto.OptionsJson) ? null : dto.OptionsJson.Trim(),
             KnowledgeTags = string.IsNullOrWhiteSpace(dto.KnowledgeTags) ? "AI生成" : dto.KnowledgeTags.Trim(),
+            PrimaryKnowledgePoint = string.IsNullOrWhiteSpace(dto.PrimaryKnowledgePoint)
+                ? string.Empty
+                : dto.PrimaryKnowledgePoint.Trim(),
             TopicTags = string.IsNullOrWhiteSpace(dto.TopicTags) ? "AI生成" : dto.TopicTags.Trim(),
             TopicKeywords = string.IsNullOrWhiteSpace(dto.TopicKeywords) ? string.Empty : dto.TopicKeywords.Trim(),
             IsEnabled = dto.IsEnabled ?? true,

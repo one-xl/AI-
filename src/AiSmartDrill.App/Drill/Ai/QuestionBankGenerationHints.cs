@@ -19,6 +19,11 @@ public sealed class QuestionBankGenerationHints
     public bool RandomizeDifficultyInBatch { get; init; }
 
     /// <summary>
+    /// 写入用户提示：要求 <c>KnowledgeTags</c> / <c>PrimaryKnowledgePoint</c> 围绕这些知识点短语展开（可为空）。
+    /// </summary>
+    public string? KnowledgeTagsHint { get; init; }
+
+    /// <summary>
     /// 写入用户提示：要求 <c>TopicTags</c> 与这些分类要点一致（可为空）。
     /// </summary>
     public string? TopicTagsHint { get; init; }

@@ -1,3 +1,4 @@
+using System.Data;
 using AiSmartDrill.App.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -43,12 +44,10 @@ public sealed class DatabaseInitializer
             // 若库文件已存在，返回 false，不得再次灌入种子，否则会与已有主键/数据冲突且会掩盖用户题库。
             var created = await db.Database.EnsureCreatedAsync(cancellationToken).ConfigureAwait(false);
 
-            if (!created)
-            {
-                _logger.LogInformation("数据库已存在，跳过演示种子初始化（保留题库、答题与错题等数据）。");
-                return;
-            }
+            await EnsureQuestionsPrimaryKnowledgePointColumnAsync(db, cancellationToken).ConfigureAwait(false);
 
+            if (created)
+            {
             _logger.LogInformation("新建数据库，写入演示种子数据...");
 
             var demoUser = new AppUser
@@ -146,6 +145,18 @@ public sealed class DatabaseInitializer
 
             await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
             _logger.LogInformation("演示种子数据写入完成。");
+            }
+            else
+            {
+                _logger.LogInformation("数据库已存在，跳过演示种子初始化（保留题库、答题与错题等数据）。");
+            }
+
+            var knowledgePatches = await QuestionKnowledgePointBackfill.BackfillAsync(db, _logger, cancellationToken)
+                .ConfigureAwait(false);
+            if (knowledgePatches > 0)
+            {
+                _logger.LogInformation("题库知识点字段已补全（{Count} 道题）。", knowledgePatches);
+            }
         }
         catch (Exception ex)
         {
@@ -154,4 +165,48 @@ public sealed class DatabaseInitializer
         }
     }
 
+    /// <summary>
+    /// 在已存在的 SQLite 题库表上补充 <c>PrimaryKnowledgePoint</c> 列（<see cref="DbContext.Database.EnsureCreatedAsync"/> 不会改旧表结构）。
+    /// </summary>
+    private static async Task EnsureQuestionsPrimaryKnowledgePointColumnAsync(
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        if (!db.Database.IsSqlite())
+        {
+            return;
+        }
+
+        var connection = db.Database.GetDbConnection();
+        var shouldClose = connection.State != ConnectionState.Open;
+        if (shouldClose)
+        {
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        try
+        {
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Questions') WHERE name='PrimaryKnowledgePoint'";
+            var scalar = await cmd.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+            var exists = scalar is long l ? l > 0 : Convert.ToInt64(scalar ?? 0L) > 0;
+            if (exists)
+            {
+                return;
+            }
+
+            await db.Database.ExecuteSqlRawAsync(
+                    "ALTER TABLE Questions ADD COLUMN PrimaryKnowledgePoint TEXT NOT NULL DEFAULT '';",
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            if (shouldClose && connection.State == ConnectionState.Open)
+            {
+                await connection.CloseAsync().ConfigureAwait(false);
+            }
+        }
+    }
 }
+

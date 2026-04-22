@@ -10,8 +10,8 @@ using Microsoft.Extensions.Logging;
 namespace AiSmartDrill.App.Drill.Ai;
 
 /// <summary>
-/// 基于火山方舟的题目推荐：向模型发送领域、分类标签、关键词与错题上下文，解析其返回的
-/// FocusTags/FocusKeywords 后在候选集中严格筛选，并排除错题本中的题目。
+/// 基于火山方舟的题目推荐：结合错题上下文推断主知识点（<c>FocusKnowledgePoint</c>），在候选集中优先推荐
+/// 同领域、同细知识点的题目，并以 FocusTags/FocusKeywords 辅助筛选，排除错题本中的题目。
 /// </summary>
 public sealed class ApiQuestionRecommendationService : IQuestionRecommendationService
 {
@@ -79,10 +79,18 @@ public sealed class ApiQuestionRecommendationService : IQuestionRecommendationSe
             contextQuestions = Array.Empty<Question>();
         }
 
+        var effectiveDomain = request.DomainScope
+                              ?? KnowledgePointInference.InferMajorityDomain(contextQuestions)
+                              ?? await KnowledgePointCatalogQuery.InferDominantDomainFromWrongBookAsync(
+                                  db,
+                                  userId,
+                                  request,
+                                  cancellationToken)
+                                  .ConfigureAwait(false);
         var candidates = await (
                 from q in db.Questions.AsNoTracking()
                 where q.IsEnabled && !wrongSet.Contains(q.Id)
-                where request.DomainScope == null || q.Domain == request.DomainScope.Value
+                where effectiveDomain == null || q.Domain == effectiveDomain.Value
                 orderby q.Id
                 select q)
             .Take(MaxCatalogLines)
@@ -92,15 +100,25 @@ public sealed class ApiQuestionRecommendationService : IQuestionRecommendationSe
         if (candidates.Count < TargetCount)
         {
             _logger.LogWarning("候选题不足 {Need}（当前 {Have}），使用本地推荐。", TargetCount, candidates.Count);
-            return await FallbackLocalAsync(db, userId, request, wrongSet, candidates, contextQuestions, cancellationToken)
+            return await FallbackLocalAsync(
+                    db,
+                    userId,
+                    request,
+                    wrongSet,
+                    candidates,
+                    contextQuestions,
+                    performanceSummary,
+                    cancellationToken)
                 .ConfigureAwait(false);
         }
 
         try
         {
             var dto = await CallArkAsync(
+                    db,
                     performanceSummary,
                     request,
+                    effectiveDomain,
                     candidates,
                     contextQuestions,
                     wrongQuestionIds,
@@ -118,92 +136,94 @@ public sealed class ApiQuestionRecommendationService : IQuestionRecommendationSe
         {
             _logger.LogError(ex, "Ark 题目推荐失败，回退本地");
             _trace.Set("recommend:local-fallback", false);
-            return await FallbackLocalAsync(db, userId, request, wrongSet, candidates, contextQuestions, cancellationToken)
+            return await FallbackLocalAsync(
+                    db,
+                    userId,
+                    request,
+                    wrongSet,
+                    candidates,
+                    contextQuestions,
+                    performanceSummary,
+                    cancellationToken)
                 .ConfigureAwait(false);
         }
     }
 
-    private static async Task<UserPerformanceSummary> BuildPerformanceSummaryAsync(
+    private static Task<UserPerformanceSummary> BuildPerformanceSummaryAsync(
         AppDbContext db,
         long userId,
-        CancellationToken cancellationToken)
-    {
-        var wrongEntries = await db.WrongBookEntries.AsNoTracking()
-            .Where(w => w.UserId == userId)
-            .ToListAsync(cancellationToken)
-            .ConfigureAwait(false);
-
-        var answerRecords = await db.AnswerRecords.AsNoTracking()
-            .Where(a => a.UserId == userId)
-            .ToListAsync(cancellationToken)
-            .ConfigureAwait(false);
-
-        return new UserPerformanceSummary
-        {
-            UserId = userId,
-            TotalAttempts = answerRecords.Count,
-            CorrectAttempts = answerRecords.Count(a => a.IsCorrect),
-            WrongBookCount = wrongEntries.Count,
-            WeakTags = await GetWeakKnowledgeTagsAsync(db, userId, cancellationToken).ConfigureAwait(false)
-        };
-    }
-
-    private static async Task<IReadOnlyList<string>> GetWeakKnowledgeTagsAsync(
-        AppDbContext db,
-        long userId,
-        CancellationToken cancellationToken)
-    {
-        var wrongTags = await db.WrongBookEntries
-            .AsNoTracking()
-            .Where(w => w.UserId == userId)
-            .Join(db.Questions.AsNoTracking(), w => w.QuestionId, q => q.Id, (_, q) => q)
-            .Select(q => q.KnowledgeTags)
-            .ToListAsync(cancellationToken)
-            .ConfigureAwait(false);
-
-        var tagCount = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (var tags in wrongTags)
-        {
-            foreach (var t in RecommendationMatcher.Tokenize(tags))
-            {
-                tagCount[t] = tagCount.TryGetValue(t, out var c) ? c + 1 : 1;
-            }
-        }
-
-        return tagCount
-            .OrderByDescending(kv => kv.Value)
-            .Take(5)
-            .Select(kv => kv.Key)
-            .ToList();
-    }
+        CancellationToken cancellationToken) =>
+        UserPerformanceSummaryFactory.CreateAsync(db, userId, cancellationToken);
 
     private async Task<QuestionRecommendationDto> CallArkAsync(
+        AppDbContext db,
         UserPerformanceSummary summary,
         QuestionRecommendationRequest request,
+        QuestionDomain? effectiveDomain,
         IReadOnlyList<Question> candidates,
         IReadOnlyList<Question> contextQuestions,
         IReadOnlyList<long> wrongQuestionIds,
         CancellationToken cancellationToken)
     {
-        var weakTagsString = string.Join(", ", summary.WeakTags);
-        var domainNote = request.DomainScope is { } dom
-            ? $"推荐领域限定为：{dom}（候选表仅含该领域且已排除错题本中该领域下的题目）。"
-            : "推荐领域：不限（候选表已排除用户错题本中的全部题目）。";
+        const int catalogAlignPool = 200;
+        IReadOnlyList<string> fullKpCatalog = effectiveDomain is { } catalogDom
+            ? await KnowledgePointCatalogQuery.LoadOrderedByFrequencyAsync(
+                    db,
+                    catalogDom,
+                    catalogAlignPool,
+                    cancellationToken)
+                .ConfigureAwait(false)
+            : Array.Empty<string>();
+
+        var weakForFilter = MergeExternalWeak(summary.WeakKnowledgePoints, request.ExternalSkillHints);
+        var anchorForCatalogSubset = KnowledgePointInference.InferPrimaryKnowledgePoint(contextQuestions)
+                                     ?? (request.ExternalSkillHints.Count > 0 ? request.ExternalSkillHints[0] : null)
+                                     ?? (summary.WeakKnowledgePoints.Count > 0 ? summary.WeakKnowledgePoints[0] : null);
+        var kpCatalogForPrompt = KnowledgePointCatalogQuery.FilterCatalogForPrompt(
+            fullKpCatalog,
+            anchorForCatalogSubset,
+            weakForFilter,
+            KnowledgePointCatalogQuery.DefaultPromptCatalogLimit);
+
+        var kpCatalogNote = kpCatalogForPrompt.Count > 0
+            ? "题库已有知识点短语（仅当前推荐领域，且为与错题主知识点/弱项细知识点相关的子集；FocusKnowledgePoint 请优先与下列之一对齐；归一化可与同领域其他已入库短语一致；候选表 Id 仍须从下方候选行选取）：\n" +
+              string.Join("、", kpCatalogForPrompt) + "\n\n"
+            : (effectiveDomain is not null
+                ? "当前领域下暂无与锚点强相关的已入库短语子集，请据错题、弱项与候选表自行给出 FocusKnowledgePoint（勿混用其他学科体系）。\n\n"
+                : "当前无法确定推荐领域，不向本题注入跨领域知识点短语表；请仅据候选表与错题上下文给出 FocusKnowledgePoint。\n\n");
+
+        var careerPathBlock = string.Empty;
+        if (request.ExternalSkillHints.Count > 0)
+        {
+            careerPathBlock =
+                "【CareerPath 岗位技能包】\n" +
+                "期望难度：" + (request.ExternalDifficultyHint ?? "未指定") + "\n" +
+                "岗位简述：" + (request.ExternalJobSummary ?? string.Empty) + "\n" +
+                "目标技能点：" + string.Join("、", request.ExternalSkillHints) + "\n\n";
+        }
+
+        var weakKp = string.Join(", ", summary.WeakKnowledgePoints);
+        var weakTopics = string.Join(", ", summary.WeakTopicTags);
+        var domainNote = request.DomainScope is { } domReq
+            ? $"推荐领域限定为：{domReq}（候选表仅含该领域且已排除错题本中该领域下的题目）。"
+            : effectiveDomain is { } domInf
+                ? $"推荐领域根据错题上下文或错题本推断为：{domInf}（候选表仅含该领域；知识点短语表仅含该领域）。"
+                : "推荐领域：不限（候选表已排除用户错题本中的全部题目；未注入跨领域知识点短语表）。";
 
         var wrongLines = new StringBuilder();
         if (contextQuestions.Count > 0)
         {
-            wrongLines.AppendLine("错题上下文（用于推断 FocusTags/FocusKeywords；勿推荐下列 Id）：");
+            wrongLines.AppendLine("错题上下文（推断 FocusTags/FocusKeywords 与 FocusKnowledgePoint；勿推荐下列 Id）：");
             foreach (var q in contextQuestions.Take(24))
             {
                 var stem = q.Stem.Length > 72 ? q.Stem[..72] + "…" : q.Stem;
                 wrongLines.AppendLine(
-                    $"Id={q.Id}; Domain={q.Domain}; TopicTags={q.TopicTags}; TopicKeywords={q.TopicKeywords}; KnowledgeTags={q.KnowledgeTags}; Stem={stem}");
+                    $"Id={q.Id}; Domain={q.Domain}; TopicTags={q.TopicTags}; TopicKeywords={q.TopicKeywords}; PrimaryKnowledgePoint={q.PrimaryKnowledgePoint}; KnowledgeTags={q.KnowledgeTags}; Stem={stem}");
             }
         }
         else
         {
-            wrongLines.AppendLine("当前无错题条目或领域筛选后无错题，请结合弱项知识点与候选表自行给出 FocusTags/FocusKeywords。");
+            wrongLines.AppendLine("当前无错题条目或领域筛选后无错题，请结合弱项细知识点与候选表自行给出 FocusKnowledgePoint 与辅助标签/关键词。");
             if (wrongQuestionIds.Count > 0)
             {
                 wrongLines.AppendLine("用户错题本题目 Id（勿推荐）：" + string.Join(", ", wrongQuestionIds.Take(40)));
@@ -211,12 +231,26 @@ public sealed class ApiQuestionRecommendationService : IQuestionRecommendationSe
         }
 
         var catalog = new StringBuilder();
-        catalog.AppendLine("候选题目表（每行：Id|Domain|TopicTags|TopicKeywords|KnowledgeTags|Stem前60字）：");
+        catalog.AppendLine(
+            "候选题目表（每行：Id|Domain|TopicTags|PrimaryKnowledgePoint|KnowledgeTags|TopicKeywords|Stem前56字）：");
         foreach (var q in candidates)
         {
-            var stem = q.Stem.Length > 60 ? q.Stem[..60] + "…" : q.Stem;
+            var stem = q.Stem.Length > 56 ? q.Stem[..56] + "…" : q.Stem;
             catalog.AppendLine(
-                $"{q.Id}|{q.Domain}|{q.TopicTags}|{q.TopicKeywords}|{q.KnowledgeTags}|{stem}");
+                $"{q.Id}|{q.Domain}|{q.TopicTags}|{q.PrimaryKnowledgePoint}|{q.KnowledgeTags}|{q.TopicKeywords}|{stem}");
+        }
+
+        var systemPrompt =
+            "你是教育场景助手。只输出一个 JSON 对象，不要 Markdown，不要解释文字。\n" +
+            "字段：Rationale(string)、FocusKnowledgePoint(string)、FocusTags(string[])、FocusKeywords(string[])、RecommendedQuestionIds(number[])。Rationale 一句话，不超过 48 字。\n" +
+            "FocusKnowledgePoint 为单个主知识点短语：须优先与「用户消息中的已有知识点短语子集」某项一致或互为包含，且须属于当前推荐领域；并与候选表中某题的 PrimaryKnowledgePoint 或 KnowledgeTags 分词一致或可互相包含；所有 RecommendedQuestionIds 应优先命中同一 FocusKnowledgePoint。\n" +
+            "FocusTags/FocusKeywords 为辅助筛选信号：贴近 TopicTags/KnowledgeTags/TopicKeywords。\n" +
+            "RecommendedQuestionIds 须恰好 " + TargetCount + " 个，且每个 Id 必须出现在候选表中；不得包含错题上下文或「勿推荐」中的 Id。\n" +
+            "若领域已限定，只推荐该 Domain 的题。";
+        if (request.ExternalSkillHints.Count > 0)
+        {
+            systemPrompt +=
+                "\n若用户消息含 CareerPath 技能包段落，FocusKnowledgePoint 与 RecommendedQuestionIds 须优先对齐「目标技能点」，并参考岗位简述与期望难度。";
         }
 
         var messages = new List<ChatMessage>
@@ -224,19 +258,16 @@ public sealed class ApiQuestionRecommendationService : IQuestionRecommendationSe
             new()
             {
                 Role = "system",
-                Content =
-                    "你是教育场景助手。只输出一个 JSON 对象，不要 Markdown，不要解释文字。\n" +
-                    "字段：Rationale(string)、FocusTags(string[])、FocusKeywords(string[])、RecommendedQuestionIds(number[])。Rationale 一句话，不超过 40 字。\n" +
-                    "FocusTags 与 FocusKeywords 由你根据错题上下文与弱项推断，用于后续在题库中筛选：标签应贴近 TopicTags/KnowledgeTags 中的词汇；关键词应可命中题干或 TopicKeywords。\n" +
-                    "RecommendedQuestionIds 须恰好 " + TargetCount + " 个，且每个 Id 必须出现在用户给出的候选表中；不得包含错题上下文中列出的 Id 或「勿推荐」列表中的 Id。\n" +
-                    "若领域已限定，只推荐该 Domain 的题。"
+                Content = systemPrompt
             },
             new()
             {
                 Role = "user",
                 Content =
                     domainNote + "\n" +
-                    $"学习摘要：总答题={summary.TotalAttempts}, 正确={summary.CorrectAttempts}, 错题条目={summary.WrongBookCount}, 弱项知识点={weakTagsString}\n\n" +
+                    kpCatalogNote +
+                    careerPathBlock +
+                    $"学习摘要：总答题={summary.TotalAttempts}, 正确={summary.CorrectAttempts}, 错题条目={summary.WrongBookCount}, 弱项模块标签={weakTopics}, 弱项细知识点={weakKp}\n\n" +
                     wrongLines + "\n" +
                     catalog
             }
@@ -260,14 +291,20 @@ public sealed class ApiQuestionRecommendationService : IQuestionRecommendationSe
 
         var focusTags = RecommendationMatcher.NormalizeTokens(parsed.FocusTags);
         var focusKeywords = RecommendationMatcher.NormalizeTokens(parsed.FocusKeywords);
-        var allowed = candidates.Select(q => q.Id).ToHashSet();
+        var modelKp = string.IsNullOrWhiteSpace(parsed.FocusKnowledgePoint) ? null : parsed.FocusKnowledgePoint.Trim();
+        var inferredKp = KnowledgePointInference.InferPrimaryKnowledgePoint(contextQuestions);
+        var fallbackKp = summary.WeakKnowledgePoints.Count > 0 ? summary.WeakKnowledgePoints[0] : null;
+        var externalKp = request.ExternalSkillHints.Count > 0 ? request.ExternalSkillHints[0] : null;
+        var resolvedKpRaw = modelKp ?? inferredKp ?? externalKp ?? fallbackKp;
+        var resolvedKp = KnowledgePointCatalogQuery.AlignFocusKnowledgePoint(resolvedKpRaw, fullKpCatalog);
 
+        var allowed = candidates.Select(q => q.Id).ToHashSet();
         var aiPicked = new List<long>();
         if (parsed.RecommendedQuestionIds is not null)
         {
             foreach (var id in parsed.RecommendedQuestionIds)
             {
-                if (aiPicked.Count >= TargetCount)
+                if (aiPicked.Count >= TargetCount * 2)
                 {
                     break;
                 }
@@ -279,113 +316,34 @@ public sealed class ApiQuestionRecommendationService : IQuestionRecommendationSe
             }
         }
 
-        var strictHits = candidates
-            .Where(q => RecommendationMatcher.MatchesStrict(q, focusTags, focusKeywords))
-            .OrderByDescending(q => ScoreQuestion(q, focusTags, focusKeywords))
-            .ThenByDescending(q => q.Id)
-            .ToList();
-
-        var final = new List<long>();
-        foreach (var id in aiPicked)
-        {
-            var q = candidates.FirstOrDefault(x => x.Id == id);
-            if (q is null)
-            {
-                continue;
-            }
-
-            if (RecommendationMatcher.MatchesStrict(q, focusTags, focusKeywords) && !final.Contains(id))
-            {
-                final.Add(id);
-            }
-        }
-
-        foreach (var q in strictHits)
-        {
-            if (final.Count >= TargetCount)
-            {
-                break;
-            }
-
-            if (!final.Contains(q.Id))
-            {
-                final.Add(q.Id);
-            }
-        }
-
-        if (final.Count < TargetCount)
-        {
-            var relaxed = candidates
-                .Where(q => RecommendationMatcher.MatchesRelaxed(q, focusTags, focusKeywords))
-                .OrderByDescending(q => ScoreQuestion(q, focusTags, focusKeywords))
-                .ThenByDescending(q => q.Id)
-                .ToList();
-            foreach (var q in relaxed)
-            {
-                if (final.Count >= TargetCount)
-                {
-                    break;
-                }
-
-                if (!final.Contains(q.Id))
-                {
-                    final.Add(q.Id);
-                }
-            }
-        }
-
-        if (final.Count < TargetCount)
-        {
-            foreach (var q in candidates.OrderByDescending(x => x.Id))
-            {
-                if (final.Count >= TargetCount)
-                {
-                    break;
-                }
-
-                if (!final.Contains(q.Id))
-                {
-                    final.Add(q.Id);
-                }
-            }
-        }
-
+        var (final, relaxedKp) = RecommendationIdAssembly.AssembleRecommendedIds(
+            candidates,
+            focusTags,
+            focusKeywords,
+            resolvedKp,
+            aiPicked,
+            TargetCount);
         if (final.Count < TargetCount)
         {
             throw new InvalidOperationException("无法凑齐推荐题量。");
         }
 
+        var rationale = string.IsNullOrWhiteSpace(parsed.Rationale) ? "模型未给出理由。" : parsed.Rationale.Trim();
+        if (relaxedKp)
+        {
+            rationale = string.IsNullOrEmpty(rationale)
+                ? "同知识点候选不足，已放宽知识点约束。"
+                : $"{rationale}（同知识点候选不足，已部分放宽）";
+        }
+
         return new QuestionRecommendationDto
         {
-            Rationale = string.IsNullOrWhiteSpace(parsed.Rationale)
-                ? "模型未给出理由。"
-                : parsed.Rationale.Trim(),
+            Rationale = rationale,
+            FocusKnowledgePoint = resolvedKp,
             FocusTags = focusTags,
             FocusKeywords = focusKeywords,
             RecommendedQuestionIds = final.Take(TargetCount).ToList()
         };
-    }
-
-    private static int ScoreQuestion(Question q, IReadOnlyList<string> focusTags, IReadOnlyList<string> focusKeywords)
-    {
-        var s = 0;
-        foreach (var t in focusTags)
-        {
-            if (RecommendationMatcher.TagFieldsContain(q, t))
-            {
-                s += 3;
-            }
-        }
-
-        foreach (var k in focusKeywords)
-        {
-            if (RecommendationMatcher.KeywordHit(q, k))
-            {
-                s += 2;
-            }
-        }
-
-        return s;
     }
 
     private async Task<QuestionRecommendationDto> FallbackLocalAsync(
@@ -395,49 +353,53 @@ public sealed class ApiQuestionRecommendationService : IQuestionRecommendationSe
         HashSet<long> wrongSet,
         IReadOnlyList<Question> candidates,
         IReadOnlyList<Question> contextQuestions,
+        UserPerformanceSummary performanceSummary,
         CancellationToken cancellationToken)
     {
-        var focusTags = InferFocusTagsLocal(contextQuestions);
-        var focusKeywords = InferFocusKeywordsLocal(contextQuestions);
+        var focusTags = MergeTokenLists(InferFocusTagsLocal(contextQuestions), request.ExternalSkillHints);
+        var focusKeywords = MergeTokenLists(InferFocusKeywordsLocal(contextQuestions), request.ExternalSkillHints);
+        var effectiveDomain = request.DomainScope
+                              ?? KnowledgePointInference.InferMajorityDomain(contextQuestions)
+                              ?? await KnowledgePointCatalogQuery.InferDominantDomainFromWrongBookAsync(
+                                      db,
+                                      userId,
+                                      request,
+                                      cancellationToken)
+                                  .ConfigureAwait(false);
+        const int catalogAlignPool = 200;
+        IReadOnlyList<string> fullKpCatalog = effectiveDomain is { } catalogDom
+            ? await KnowledgePointCatalogQuery.LoadOrderedByFrequencyAsync(
+                    db,
+                    catalogDom,
+                    catalogAlignPool,
+                    cancellationToken)
+                .ConfigureAwait(false)
+            : Array.Empty<string>();
+        var resolvedKpRaw = KnowledgePointInference.InferPrimaryKnowledgePoint(contextQuestions)
+                            ?? (request.ExternalSkillHints.Count > 0 ? request.ExternalSkillHints[0] : null)
+                            ?? (performanceSummary.WeakKnowledgePoints.Count > 0
+                                ? performanceSummary.WeakKnowledgePoints[0]
+                                : null);
+        var resolvedKp = KnowledgePointCatalogQuery.AlignFocusKnowledgePoint(resolvedKpRaw, fullKpCatalog);
 
-        var strict = candidates
-            .Where(q => RecommendationMatcher.MatchesStrict(q, focusTags, focusKeywords))
-            .OrderByDescending(q => ScoreQuestion(q, focusTags, focusKeywords))
-            .ThenByDescending(q => q.Id)
-            .ToList();
-
-        var final = strict.Select(q => q.Id).Take(TargetCount).ToList();
+        var (final, relaxedKp) = RecommendationIdAssembly.AssembleRecommendedIds(
+            candidates,
+            focusTags,
+            focusKeywords,
+            resolvedKp,
+            Array.Empty<long>(),
+            TargetCount);
         if (final.Count < TargetCount)
         {
-            var relaxed = candidates
-                .Where(q => RecommendationMatcher.MatchesRelaxed(q, focusTags, focusKeywords))
-                .OrderByDescending(q => q.Id)
-                .ToList();
-            foreach (var q in relaxed)
-            {
-                if (final.Count >= TargetCount)
-                {
-                    break;
-                }
-
-                if (!final.Contains(q.Id))
-                {
-                    final.Add(q.Id);
-                }
-            }
-        }
-
-        if (final.Count < TargetCount)
-        {
-            var more = await db.Questions.AsNoTracking()
+            var moreIds = await db.Questions.AsNoTracking()
                 .Where(q => q.IsEnabled && !wrongSet.Contains(q.Id))
-                .Where(q => request.DomainScope == null || q.Domain == request.DomainScope.Value)
+                .Where(q => effectiveDomain == null || q.Domain == effectiveDomain.Value)
                 .OrderByDescending(q => q.Id)
                 .Select(q => q.Id)
-                .Take(TargetCount)
+                .Take(TargetCount * 2)
                 .ToListAsync(cancellationToken)
                 .ConfigureAwait(false);
-            foreach (var id in more)
+            foreach (var id in moreIds)
             {
                 if (final.Count >= TargetCount)
                 {
@@ -451,10 +413,17 @@ public sealed class ApiQuestionRecommendationService : IQuestionRecommendationSe
             }
         }
 
+        var rationale =
+            "[本地回退] 云端不可用或候选不足。已按主知识点与 TopicTags/TopicKeywords 筛选，并排除错题本题目。";
+        if (relaxedKp)
+        {
+            rationale += "（同知识点候选不足，已部分放宽）";
+        }
+
         return new QuestionRecommendationDto
         {
-            Rationale =
-                "[本地回退] 云端不可用或候选不足。已按错题 TopicTags/TopicKeywords 与知识点在题库中筛选，并排除错题本题目。",
+            Rationale = rationale,
+            FocusKnowledgePoint = resolvedKp,
             FocusTags = focusTags,
             FocusKeywords = focusKeywords,
             RecommendedQuestionIds = final.Take(TargetCount).ToList()
@@ -473,7 +442,10 @@ public sealed class ApiQuestionRecommendationService : IQuestionRecommendationSe
 
             foreach (var t in RecommendationMatcher.Tokenize(q.KnowledgeTags))
             {
-                bag[t] = bag.TryGetValue(t, out var c) ? c + 1 : 1;
+                if (!KnowledgeTagStopwords.IsStopword(t))
+                {
+                    bag[t] = bag.TryGetValue(t, out var c) ? c + 1 : 1;
+                }
             }
         }
 
@@ -505,144 +477,73 @@ public sealed class ApiQuestionRecommendationService : IQuestionRecommendationSe
             .ToList();
     }
 
+    /// <summary>
+    /// 弱项知识点与 CareerPath 外部技能点合并（外部优先），供子集筛选。
+    /// </summary>
+    private static List<string> MergeExternalWeak(IReadOnlyList<string> weak, IReadOnlyList<string> external)
+    {
+        var r = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var x in external)
+        {
+            var t = (x ?? string.Empty).Trim();
+            if (t.Length > 0 && seen.Add(t))
+            {
+                r.Add(t);
+            }
+        }
+
+        foreach (var x in weak)
+        {
+            var t = (x ?? string.Empty).Trim();
+            if (t.Length > 0 && seen.Add(t))
+            {
+                r.Add(t);
+            }
+        }
+
+        return r;
+    }
+
+    /// <summary>
+    /// 将推断出的焦点词与外部技能点去重合并。
+    /// </summary>
+    private static IReadOnlyList<string> MergeTokenLists(IReadOnlyList<string> baseTokens, IReadOnlyList<string> extra)
+    {
+        if (extra.Count == 0)
+        {
+            return baseTokens;
+        }
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var list = new List<string>();
+        foreach (var x in baseTokens)
+        {
+            var t = (x ?? string.Empty).Trim();
+            if (t.Length > 0 && seen.Add(t))
+            {
+                list.Add(t);
+            }
+        }
+
+        foreach (var x in extra)
+        {
+            var t = (x ?? string.Empty).Trim();
+            if (t.Length > 0 && seen.Add(t))
+            {
+                list.Add(t);
+            }
+        }
+
+        return list;
+    }
+
     private sealed class ArkRecommendationPayload
     {
         public string? Rationale { get; set; }
+        public string? FocusKnowledgePoint { get; set; }
         public List<string>? FocusTags { get; set; }
         public List<string>? FocusKeywords { get; set; }
         public List<long>? RecommendedQuestionIds { get; set; }
-    }
-}
-
-/// <summary>
-/// 题目与 FocusTags/FocusKeywords 的匹配工具（严格：标签维与关键词维同时满足各自约束；宽松：任一侧命中）。
-/// </summary>
-internal static class RecommendationMatcher
-{
-    private static readonly char[] Delims = { ',', '，', ';', '；', '|', '、' };
-
-    /// <summary>
-    /// 将模型或配置中的字符串列表规范化（去空、去重）。
-    /// </summary>
-    public static IReadOnlyList<string> NormalizeTokens(IEnumerable<string>? items)
-    {
-        if (items is null)
-        {
-            return Array.Empty<string>();
-        }
-
-        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var x in items)
-        {
-            var t = (x ?? string.Empty).Trim();
-            if (t.Length > 0)
-            {
-                set.Add(t);
-            }
-        }
-
-        return set.ToList();
-    }
-
-    /// <summary>
-    /// 拆分题目侧多值字段。
-    /// </summary>
-    public static IEnumerable<string> Tokenize(string? text)
-    {
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            yield break;
-        }
-
-        foreach (var p in text.Split(Delims, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            if (p.Length > 0)
-            {
-                yield return p;
-            }
-        }
-    }
-
-    /// <summary>
-    /// 严格匹配：无标签要求或任一标签命中；无关键词要求或任一关键词命中；两者同时成立。
-    /// </summary>
-    public static bool MatchesStrict(Question q, IReadOnlyList<string> focusTags, IReadOnlyList<string> focusKeywords)
-    {
-        var tagOk = focusTags.Count == 0 || focusTags.Any(t => TagFieldsContain(q, t));
-        var kwOk = focusKeywords.Count == 0 || focusKeywords.Any(k => KeywordHit(q, k));
-        return tagOk && kwOk;
-    }
-
-    /// <summary>
-    /// 宽松匹配：至少一侧有要求时，标签或关键词任一命中即可。
-    /// </summary>
-    public static bool MatchesRelaxed(Question q, IReadOnlyList<string> focusTags, IReadOnlyList<string> focusKeywords)
-    {
-        if (focusTags.Count == 0 && focusKeywords.Count == 0)
-        {
-            return true;
-        }
-
-        var tagHit = focusTags.Any(t => TagFieldsContain(q, t));
-        var kwHit = focusKeywords.Any(k => KeywordHit(q, k));
-        return tagHit || kwHit;
-    }
-
-    /// <summary>
-    /// 判断分类标签 token 是否出现在题目的 TopicTags 或 KnowledgeTags 分词中。
-    /// </summary>
-    public static bool TagFieldsContain(Question q, string token)
-    {
-        if (string.IsNullOrWhiteSpace(token))
-        {
-            return false;
-        }
-
-        token = token.Trim();
-        foreach (var bucket in new[] { q.TopicTags, q.KnowledgeTags })
-        {
-            foreach (var t in Tokenize(bucket))
-            {
-                if (t.Equals(token, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-
-                if (t.Contains(token, StringComparison.OrdinalIgnoreCase) ||
-                    token.Contains(t, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    /// 判断关键词是否出现在题干、TopicKeywords 或 KnowledgeTags 中。
-    /// </summary>
-    public static bool KeywordHit(Question q, string keyword)
-    {
-        if (string.IsNullOrWhiteSpace(keyword))
-        {
-            return false;
-        }
-
-        keyword = keyword.Trim();
-        if (q.Stem.Contains(keyword, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        foreach (var hay in new[] { q.TopicKeywords, q.KnowledgeTags, q.TopicTags })
-        {
-            if (!string.IsNullOrEmpty(hay) && hay.Contains(keyword, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 }

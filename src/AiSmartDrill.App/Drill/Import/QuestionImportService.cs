@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text.Json;
 using AiSmartDrill.App.Domain;
+using AiSmartDrill.App.Drill.Ai;
 using AiSmartDrill.App.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -157,6 +158,7 @@ public sealed class QuestionImportService
     {
         var type = Enum.Parse<QuestionType>(dto.Type!, true);
         var difficulty = Enum.Parse<DifficultyLevel>(dto.Difficulty!, true);
+        var knowledgeTags = string.IsNullOrWhiteSpace(dto.KnowledgeTags) ? "未分类" : dto.KnowledgeTags.Trim();
 
         return new Question
         {
@@ -165,12 +167,37 @@ public sealed class QuestionImportService
             Stem = dto.Stem!.Trim(),
             StandardAnswer = dto.StandardAnswer!.Trim(),
             OptionsJson = string.IsNullOrWhiteSpace(dto.OptionsJson) ? null : dto.OptionsJson.Trim(),
-            KnowledgeTags = string.IsNullOrWhiteSpace(dto.KnowledgeTags) ? "未分类" : dto.KnowledgeTags.Trim(),
+            KnowledgeTags = knowledgeTags,
+            PrimaryKnowledgePoint = NormalizeImportedPrimary(dto.PrimaryKnowledgePoint, knowledgeTags),
             TopicTags = string.IsNullOrWhiteSpace(dto.TopicTags) ? string.Empty : dto.TopicTags.Trim(),
             TopicKeywords = string.IsNullOrWhiteSpace(dto.TopicKeywords) ? string.Empty : dto.TopicKeywords.Trim(),
             IsEnabled = dto.IsEnabled ?? true,
             CreatedAtUtc = DateTime.UtcNow
         };
+    }
+
+    private static string NormalizeImportedPrimary(string? primaryField, string knowledgeTagsCsv)
+    {
+        var raw = (primaryField ?? string.Empty).Trim();
+        if (raw.Length > 128)
+        {
+            raw = raw[..128];
+        }
+
+        if (raw.Length > 0)
+        {
+            return raw;
+        }
+
+        foreach (var t in RecommendationMatcher.Tokenize(knowledgeTagsCsv))
+        {
+            if (!KnowledgeTagStopwords.IsStopword(t))
+            {
+                return t.Length > 128 ? t[..128] : t;
+            }
+        }
+
+        return "未分类";
     }
 }
 
@@ -185,6 +212,7 @@ public sealed class QuestionImportDto
     public string? StandardAnswer { get; init; }
     public string? OptionsJson { get; init; }
     public string? KnowledgeTags { get; init; }
+    public string? PrimaryKnowledgePoint { get; init; }
     public string? TopicTags { get; init; }
     public string? TopicKeywords { get; init; }
     public bool? IsEnabled { get; init; }

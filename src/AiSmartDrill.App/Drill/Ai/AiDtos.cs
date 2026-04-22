@@ -170,6 +170,21 @@ public sealed class QuestionRecommendationRequest
     /// 获取「错题本 / AI」页领域筛选：为 null 表示「全部」领域；非 null 时候选与错题统计均限定该领域。
     /// </summary>
     public QuestionDomain? DomainScope { get; init; }
+
+    /// <summary>
+    /// CareerPath 等外部技能包传入的知识点列表；与 <see cref="SelectedWrongQuestionIds"/> 可同时存在，用于丰富推荐上下文。
+    /// </summary>
+    public IReadOnlyList<string> ExternalSkillHints { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// 外部技能包中的岗位简述（供 AI 推荐提示词）。
+    /// </summary>
+    public string? ExternalJobSummary { get; init; }
+
+    /// <summary>
+    /// 外部技能包中的期望难度文案（如「简单」「中等」「困难」）。
+    /// </summary>
+    public string? ExternalDifficultyHint { get; init; }
 }
 
 /// <summary>
@@ -186,6 +201,11 @@ public sealed class QuestionRecommendationDto
     /// 获取或设置模型给出的聚焦分类标签（用于服务端二次筛选）。
     /// </summary>
     public IReadOnlyList<string> FocusTags { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// 获取或设置模型给出的主知识点短语（须与候选题 <c>PrimaryKnowledgePoint</c> 或 <c>KnowledgeTags</c> 中某项一致或包含）。
+    /// </summary>
+    public string? FocusKnowledgePoint { get; init; }
 
     /// <summary>
     /// 获取或设置模型给出的聚焦关键词（用于服务端二次筛选）。
@@ -214,9 +234,14 @@ public sealed class StudyPlanDto
     public int DailyQuestionQuota { get; init; }
 
     /// <summary>
-    /// 获取或设置重点知识点标签集合。
+    /// 获取或设置重点模块/大标签集合（对应题库 <c>TopicTags</c> 维度）。
     /// </summary>
     public IReadOnlyList<string> FocusKnowledgeTags { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// 获取或设置需要补学的细粒度知识点清单（可执行、可对照教材的小点）。
+    /// </summary>
+    public IReadOnlyList<string> FocusKnowledgePoints { get; init; } = Array.Empty<string>();
 
     /// <summary>
     /// 获取或设置阶段天数。
@@ -255,7 +280,17 @@ public sealed class UserPerformanceSummary
     public int WrongBookCount { get; init; }
 
     /// <summary>
-    /// 获取或设置高频错误知识点标签（逗号分隔或列表）。
+    /// 获取或设置高频错误细知识点（与 <see cref="WeakKnowledgePoints"/> 同源，保留字段以兼容旧调用）。
     /// </summary>
     public IReadOnlyList<string> WeakTags { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// 获取或设置错题中统计出的细知识点弱项（已过滤题型等噪声词）。
+    /// </summary>
+    public IReadOnlyList<string> WeakKnowledgePoints { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// 获取或设置错题关联题中高频出现的模块/大标签（<c>TopicTags</c> 分词）。
+    /// </summary>
+    public IReadOnlyList<string> WeakTopicTags { get; init; } = Array.Empty<string>();
 }
