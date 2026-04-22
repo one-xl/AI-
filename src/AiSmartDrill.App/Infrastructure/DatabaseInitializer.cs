@@ -45,6 +45,7 @@ public sealed class DatabaseInitializer
             var created = await db.Database.EnsureCreatedAsync(cancellationToken).ConfigureAwait(false);
 
             await EnsureQuestionsPrimaryKnowledgePointColumnAsync(db, cancellationToken).ConfigureAwait(false);
+            await EnsureStudyPlanHistoryTableAsync(db, cancellationToken).ConfigureAwait(false);
 
             if (created)
             {
@@ -208,5 +209,37 @@ public sealed class DatabaseInitializer
             }
         }
     }
-}
 
+    /// <summary>
+    /// 在已存在数据库上补充学习计划历史表；首次建库时与 <see cref="EnsureCreatedAsync"/> 并存，旧库则按需创建。
+    /// </summary>
+    private static async Task EnsureStudyPlanHistoryTableAsync(
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        if (!db.Database.IsSqlite())
+        {
+            return;
+        }
+
+        const string createTableSql = """
+            CREATE TABLE IF NOT EXISTS "StudyPlanHistoryEntries" (
+                "Id" INTEGER NOT NULL CONSTRAINT "PK_StudyPlanHistoryEntries" PRIMARY KEY AUTOINCREMENT,
+                "UserId" INTEGER NOT NULL,
+                "Theme" TEXT NOT NULL,
+                "Title" TEXT NOT NULL,
+                "Content" TEXT NOT NULL,
+                "CreatedAtUtc" TEXT NOT NULL,
+                CONSTRAINT "FK_StudyPlanHistoryEntries_AppUsers_UserId" FOREIGN KEY ("UserId") REFERENCES "AppUsers" ("Id") ON DELETE CASCADE
+            );
+            """;
+
+        const string createIndexSql = """
+            CREATE INDEX IF NOT EXISTS "IX_StudyPlanHistory_User_CreatedAt"
+            ON "StudyPlanHistoryEntries" ("UserId", "CreatedAtUtc");
+            """;
+
+        await db.Database.ExecuteSqlRawAsync(createTableSql, cancellationToken).ConfigureAwait(false);
+        await db.Database.ExecuteSqlRawAsync(createIndexSql, cancellationToken).ConfigureAwait(false);
+    }
+}

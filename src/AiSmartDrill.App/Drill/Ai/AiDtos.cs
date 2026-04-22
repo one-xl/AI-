@@ -224,6 +224,11 @@ public sealed class QuestionRecommendationDto
 public sealed class StudyPlanDto
 {
     /// <summary>
+    /// 获取或设置计划主题（供历史记录与列表展示）。
+    /// </summary>
+    public string Theme { get; init; } = string.Empty;
+
+    /// <summary>
     /// 获取或设置计划标题。
     /// </summary>
     public string Title { get; init; } = string.Empty;
@@ -249,9 +254,81 @@ public sealed class StudyPlanDto
     public int PhaseDays { get; init; }
 
     /// <summary>
+    /// 获取或设置总建议题量。
+    /// </summary>
+    public int TotalQuestionQuota { get; init; }
+
+    /// <summary>
+    /// 获取或设置分阶段执行计划。
+    /// </summary>
+    public IReadOnlyList<StudyPlanStageDto> StagePlans { get; init; } = Array.Empty<StudyPlanStageDto>();
+
+    /// <summary>
     /// 获取或设置计划说明（自然语言）。
     /// </summary>
     public string Notes { get; init; } = string.Empty;
+}
+
+/// <summary>
+/// 表示学习计划中的一个执行阶段。
+/// </summary>
+public sealed class StudyPlanStageDto
+{
+    /// <summary>
+    /// 获取或设置阶段名称。
+    /// </summary>
+    public string StageName { get; init; } = string.Empty;
+
+    /// <summary>
+    /// 获取或设置天数范围，如“第 1-3 天”。
+    /// </summary>
+    public string DayRange { get; init; } = string.Empty;
+
+    /// <summary>
+    /// 获取或设置每日新题量。
+    /// </summary>
+    public int DailyNewQuestionQuota { get; init; }
+
+    /// <summary>
+    /// 获取或设置每日复盘/重做题量。
+    /// </summary>
+    public int DailyReviewQuestionQuota { get; init; }
+
+    /// <summary>
+    /// 获取或设置本阶段重点模块。
+    /// </summary>
+    public IReadOnlyList<string> FocusKnowledgeTags { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// 获取或设置本阶段重点知识点。
+    /// </summary>
+    public IReadOnlyList<string> FocusKnowledgePoints { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// 获取或设置阶段目标。
+    /// </summary>
+    public string Goal { get; init; } = string.Empty;
+
+    /// <summary>
+    /// 获取或设置执行清单。
+    /// </summary>
+    public IReadOnlyList<string> Checklist { get; init; } = Array.Empty<string>();
+}
+
+/// <summary>
+/// 表示弱项统计项，供学习计划与推荐提示词使用。
+/// </summary>
+public sealed class WeaknessStatDto
+{
+    /// <summary>
+    /// 获取或设置标签名或知识点名。
+    /// </summary>
+    public string Name { get; init; } = string.Empty;
+
+    /// <summary>
+    /// 获取或设置累计弱项次数。
+    /// </summary>
+    public int Count { get; init; }
 }
 
 /// <summary>
@@ -293,4 +370,14 @@ public sealed class UserPerformanceSummary
     /// 获取或设置错题关联题中高频出现的模块/大标签（<c>TopicTags</c> 分词）。
     /// </summary>
     public IReadOnlyList<string> WeakTopicTags { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// 获取或设置模块弱项频次统计。
+    /// </summary>
+    public IReadOnlyList<WeaknessStatDto> WeakTopicTagStats { get; init; } = Array.Empty<WeaknessStatDto>();
+
+    /// <summary>
+    /// 获取或设置细知识点弱项频次统计。
+    /// </summary>
+    public IReadOnlyList<WeaknessStatDto> WeakKnowledgePointStats { get; init; } = Array.Empty<WeaknessStatDto>();
 }

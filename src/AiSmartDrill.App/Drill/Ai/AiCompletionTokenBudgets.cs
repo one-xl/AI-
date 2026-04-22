@@ -5,7 +5,7 @@ namespace AiSmartDrill.App.Drill.Ai;
 /// </summary>
 internal static class AiCompletionTokenBudgets
 {
-    public static int StudyPlanJson => 480;
+    public static int StudyPlanJson => 1400;
 
     public static int RecommendationJson => 720;
 

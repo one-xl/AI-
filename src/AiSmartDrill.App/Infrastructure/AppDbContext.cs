@@ -37,6 +37,11 @@ public sealed class AppDbContext : DbContext
     /// </summary>
     public DbSet<WrongBookEntry> WrongBookEntries => Set<WrongBookEntry>();
 
+    /// <summary>
+    /// 获取学习计划历史集合。
+    /// </summary>
+    public DbSet<StudyPlanHistoryEntry> StudyPlanHistoryEntries => Set<StudyPlanHistoryEntry>();
+
     /// <inheritdoc />
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -101,6 +106,22 @@ public sealed class AppDbContext : DbContext
             e.HasOne(x => x.Question)
                 .WithMany(q => q.WrongBookEntries)
                 .HasForeignKey(x => x.QuestionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // 学习计划历史：保留主题、标题与正文，支持按用户/时间回看。
+        modelBuilder.Entity<StudyPlanHistoryEntry>(e =>
+        {
+            e.ToTable("StudyPlanHistoryEntries");
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Theme).HasMaxLength(200).IsRequired();
+            e.Property(x => x.Title).HasMaxLength(240).IsRequired();
+            e.Property(x => x.Content).HasMaxLength(16000).IsRequired();
+            e.HasIndex(x => new { x.UserId, x.CreatedAtUtc })
+                .HasDatabaseName("IX_StudyPlanHistory_User_CreatedAt");
+            e.HasOne(x => x.User)
+                .WithMany()
+                .HasForeignKey(x => x.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
     }

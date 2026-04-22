@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.IO;
 using System.Security.Cryptography;
 using System.Runtime.InteropServices;
@@ -221,7 +222,9 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
 
         foreach (var label in EditorDomainOptions)
         {
-            ExamDomainPicks.Add(new ExamDomainPickVm(MapUiToDomain(label), label));
+            var pick = new ExamDomainPickVm(MapUiToDomain(label), label);
+            pick.PropertyChanged += OnExamDomainPickPropertyChanged;
+            ExamDomainPicks.Add(pick);
         }
 
         BankAiTemplateOptions = new ObservableCollection<string>
@@ -432,6 +435,36 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     /// 刷题组卷时可多选的领域列表；若至少勾选一项，则仅从勾选领域抽题；若全部未勾选，则领域范围沿用「题库管理」页的领域下拉（「全部」表示不限）。
     /// </summary>
     public ObservableCollection<ExamDomainPickVm> ExamDomainPicks { get; } = new();
+
+    /// <summary>
+    /// 组卷领域弹出面板按钮文案。
+    /// </summary>
+    public string ExamDomainPickerCaption => SelectedExamDomainCount > 0
+        ? $"选择领域（已选 {SelectedExamDomainCount}）"
+        : "选择领域";
+
+    /// <summary>
+    /// 已勾选领域数量。
+    /// </summary>
+    public int SelectedExamDomainCount => ExamDomainPicks.Count(x => x.IsSelected);
+
+    /// <summary>
+    /// 已勾选领域摘要；未勾选时提示沿用题库筛选领域。
+    /// </summary>
+    public string ExamSelectedDomainsSummary
+    {
+        get
+        {
+            var selected = ExamDomainPicks.Where(x => x.IsSelected).Select(x => x.DisplayName).ToList();
+            return selected.Count switch
+            {
+                0 => "未单独限制，默认跟随题库页当前领域筛选。",
+                1 => selected[0],
+                2 => string.Join("、", selected),
+                _ => $"{string.Join("、", selected.Take(2))} 等 {selected.Count} 个领域"
+            };
+        }
+    }
 
     /// <summary>
     /// 题库列表（当前筛选结果）。
@@ -733,11 +766,62 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         _ = RefreshWrongBookAsync();
     }
 
+    private void OnExamDomainPickPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (!string.Equals(e.PropertyName, nameof(ExamDomainPickVm.IsSelected), StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        OnPropertyChanged(nameof(ExamDomainPickerCaption));
+        OnPropertyChanged(nameof(SelectedExamDomainCount));
+        OnPropertyChanged(nameof(ExamSelectedDomainsSummary));
+    }
+
+    partial void OnSelectedStudyPlanHistoryChanged(StudyPlanHistoryEntry? value)
+    {
+        if (value is null)
+        {
+            return;
+        }
+
+        StudyPlanTheme = value.Theme;
+        StudyPlanTitle = value.Title;
+        StudyPlanText = value.Content;
+        StatusMessage = $"已载入 {value.CreatedAtUtc.ToLocalTime():yyyy-MM-dd HH:mm} 保存的学习计划。";
+    }
+
     /// <summary>
     /// 学习计划输出。
     /// </summary>
     [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(SaveStudyPlanCommand))]
     private string _studyPlanText = string.Empty;
+
+    /// <summary>
+    /// 当前学习计划主题。
+    /// </summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(SaveStudyPlanCommand))]
+    private string _studyPlanTheme = string.Empty;
+
+    /// <summary>
+    /// 当前学习计划标题。
+    /// </summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(SaveStudyPlanCommand))]
+    private string _studyPlanTitle = string.Empty;
+
+    /// <summary>
+    /// 历史学习计划列表。
+    /// </summary>
+    public ObservableCollection<StudyPlanHistoryEntry> StudyPlanHistories { get; } = new();
+
+    /// <summary>
+    /// 当前选中的学习计划历史记录。
+    /// </summary>
+    [ObservableProperty]
+    private StudyPlanHistoryEntry? _selectedStudyPlanHistory;
 
     /// <summary>
     /// 错题本页「AI 输出」区域是否显示加载遮罩（错题解析 / 题目推荐进行中）。
@@ -755,6 +839,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     /// 学习计划页大文本框是否显示加载遮罩。
     /// </summary>
     [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(SaveStudyPlanCommand))]
     private bool _studyPlanOutputBusy;
 
     /// <summary>
@@ -3028,10 +3113,13 @@ private static void ActivateMainWindowForCareerPath()
                 return;
             }
 
-            StudyPlanText =
-                $"{plan.Title}\r\n阶段：{plan.PhaseDays} 天；每日：{plan.DailyQuestionQuota} 题。\r\n模块重点：{string.Join("、", plan.FocusKnowledgeTags)}\r\n知识点：{string.Join("、", plan.FocusKnowledgePoints)}\r\n说明：{plan.Notes}";
+            StudyPlanTheme = string.IsNullOrWhiteSpace(plan.Theme) ? plan.Title : plan.Theme;
+            StudyPlanTitle = plan.Title;
+            StudyPlanText = FormatStudyPlan(plan, summary);
+            SelectedStudyPlanHistory = null;
             ApplyAiTraceToUi("学习计划");
-            StatusMessage = "学习计划已生成。";
+            await RefreshStudyPlanHistoryCoreAsync().ConfigureAwait(false);
+            StatusMessage = "学习计划已生成，可保存到历史记录。";
         }
         catch (OperationCanceledException)
         {
@@ -3042,6 +3130,8 @@ private static void ActivateMainWindowForCareerPath()
         catch (Exception ex)
         {
             _logger.LogError(ex, "AI 学习计划生成失败");
+            StudyPlanTheme = string.Empty;
+            StudyPlanTitle = string.Empty;
             StudyPlanText = "学习计划生成失败：" + FormatExceptionMessage(ex);
             SetAiPipeline("失败", FormatExceptionMessage(ex));
             AppendAiLog("学习计划：失败 — " + FormatExceptionMessage(ex));
@@ -3053,6 +3143,133 @@ private static void ActivateMainWindowForCareerPath()
             SetStudyPlanOutputLoading(false);
         }
     }
+
+    /// <summary>
+    /// 保存当前学习计划到历史记录。
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanSaveStudyPlan))]
+    private async Task SaveStudyPlanAsync()
+    {
+        var theme = string.IsNullOrWhiteSpace(StudyPlanTheme) ? StudyPlanTitle : StudyPlanTheme;
+        if (string.IsNullOrWhiteSpace(theme) || string.IsNullOrWhiteSpace(StudyPlanText))
+        {
+            StatusMessage = "当前没有可保存的学习计划。";
+            return;
+        }
+
+        try
+        {
+            await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(false);
+            var entry = new StudyPlanHistoryEntry
+            {
+                UserId = DatabaseInitializer.DemoUserId,
+                Theme = theme.Trim(),
+                Title = string.IsNullOrWhiteSpace(StudyPlanTitle) ? theme.Trim() : StudyPlanTitle.Trim(),
+                Content = StudyPlanText.Trim(),
+                CreatedAtUtc = DateTime.UtcNow
+            };
+
+            db.StudyPlanHistoryEntries.Add(entry);
+            await db.SaveChangesAsync().ConfigureAwait(false);
+            await RefreshStudyPlanHistoryCoreAsync(entry.Id).ConfigureAwait(false);
+            StatusMessage = "学习计划已保存到历史记录。";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "保存学习计划历史失败");
+            StatusMessage = "保存学习计划失败：" + ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// 刷新学习计划历史列表。
+    /// </summary>
+    [RelayCommand]
+    private async Task RefreshStudyPlanHistoryAsync()
+    {
+        await RefreshStudyPlanHistoryCoreAsync().ConfigureAwait(false);
+    }
+
+    private bool CanSaveStudyPlan() =>
+        !StudyPlanOutputBusy &&
+        !string.IsNullOrWhiteSpace(StudyPlanText) &&
+        (!string.IsNullOrWhiteSpace(StudyPlanTheme) || !string.IsNullOrWhiteSpace(StudyPlanTitle));
+
+    private async Task RefreshStudyPlanHistoryCoreAsync(long? selectId = null)
+    {
+        try
+        {
+            await using var db = await _dbFactory.CreateDbContextAsync().ConfigureAwait(false);
+            var list = await db.StudyPlanHistoryEntries
+                .AsNoTracking()
+                .Where(x => x.UserId == DatabaseInitializer.DemoUserId)
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .Take(50)
+                .ToListAsync()
+                .ConfigureAwait(false);
+
+            Ui(() =>
+            {
+                StudyPlanHistories.Clear();
+                foreach (var item in list)
+                {
+                    StudyPlanHistories.Add(item);
+                }
+
+                if (selectId is long id)
+                {
+                    SelectedStudyPlanHistory = StudyPlanHistories.FirstOrDefault(x => x.Id == id);
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "刷新学习计划历史失败");
+            StatusMessage = "读取学习计划历史失败：" + ex.Message;
+        }
+    }
+
+    private static string FormatStudyPlan(StudyPlanDto plan, UserPerformanceSummary summary)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine(plan.Title);
+        sb.AppendLine($"主题：{(string.IsNullOrWhiteSpace(plan.Theme) ? plan.Title : plan.Theme)}");
+        sb.AppendLine($"周期：{plan.PhaseDays} 天");
+        sb.AppendLine($"建议总题量：{plan.TotalQuestionQuota} 题");
+        sb.AppendLine($"日均题量：{plan.DailyQuestionQuota} 题");
+        sb.AppendLine($"重点模块：{string.Join("、", plan.FocusKnowledgeTags)}");
+        sb.AppendLine($"重点知识点：{string.Join("、", plan.FocusKnowledgePoints)}");
+        sb.AppendLine();
+        sb.AppendLine("学习画像：");
+        sb.AppendLine($"- 总答题：{summary.TotalAttempts}，正确：{summary.CorrectAttempts}，错题本：{summary.WrongBookCount}");
+        sb.AppendLine($"- 模块弱项：{FormatWeakness(summary.WeakTopicTagStats)}");
+        sb.AppendLine($"- 知识点弱项：{FormatWeakness(summary.WeakKnowledgePointStats)}");
+        sb.AppendLine();
+        sb.AppendLine("阶段规划：");
+
+        for (var i = 0; i < plan.StagePlans.Count; i++)
+        {
+            var stage = plan.StagePlans[i];
+            sb.AppendLine($"{i + 1}. {stage.StageName}（{stage.DayRange}）");
+            sb.AppendLine($"   每日新题：{stage.DailyNewQuestionQuota} 题；复盘题：{stage.DailyReviewQuestionQuota} 题");
+            sb.AppendLine($"   重点模块：{string.Join("、", stage.FocusKnowledgeTags)}");
+            sb.AppendLine($"   重点知识点：{string.Join("、", stage.FocusKnowledgePoints)}");
+            sb.AppendLine($"   阶段目标：{stage.Goal}");
+            foreach (var item in stage.Checklist)
+            {
+                sb.AppendLine($"   - {item}");
+            }
+
+            sb.AppendLine();
+        }
+
+        sb.AppendLine("规划说明：");
+        sb.AppendLine(plan.Notes);
+        return sb.ToString().TrimEnd();
+    }
+
+    private static string FormatWeakness(IReadOnlyList<WeaknessStatDto> stats) =>
+        stats.Count == 0 ? "暂无" : string.Join("；", stats.Select(x => $"{x.Name}({x.Count})"));
 
     // 考试过程中保存每题作答（题号 -> 答案文本）。
     private readonly Dictionary<int, string> _answersByDisplayIndex = new();

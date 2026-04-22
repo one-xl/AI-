@@ -36,13 +36,15 @@ internal static class UserPerformanceSummaryFactory
             TotalAttempts = answerRecords.Count,
             CorrectAttempts = answerRecords.Count(a => a.IsCorrect),
             WrongBookCount = wrongEntries.Count,
-            WeakTags = weakKp,
-            WeakKnowledgePoints = weakKp,
-            WeakTopicTags = weakTopics
+            WeakTags = weakKp.Select(x => x.Name).ToList(),
+            WeakKnowledgePoints = weakKp.Select(x => x.Name).ToList(),
+            WeakTopicTags = weakTopics.Select(x => x.Name).ToList(),
+            WeakKnowledgePointStats = weakKp,
+            WeakTopicTagStats = weakTopics
         };
     }
 
-    private static async Task<IReadOnlyList<string>> TopWeakTopicTagsAsync(
+    private static async Task<IReadOnlyList<WeaknessStatDto>> TopWeakTopicTagsAsync(
         AppDbContext db,
         long userId,
         CancellationToken cancellationToken)
@@ -71,11 +73,11 @@ internal static class UserPerformanceSummaryFactory
         return bag
             .OrderByDescending(kv => kv.Value)
             .Take(5)
-            .Select(kv => kv.Key)
+            .Select(kv => new WeaknessStatDto { Name = kv.Key, Count = kv.Value })
             .ToList();
     }
 
-    private static async Task<IReadOnlyList<string>> TopWeakKnowledgePointsAsync(
+    private static async Task<IReadOnlyList<WeaknessStatDto>> TopWeakKnowledgePointsAsync(
         AppDbContext db,
         long userId,
         CancellationToken cancellationToken)
@@ -110,7 +112,7 @@ internal static class UserPerformanceSummaryFactory
         return bag
             .OrderByDescending(kv => kv.Value)
             .Take(5)
-            .Select(kv => kv.Key)
+            .Select(kv => new WeaknessStatDto { Name = kv.Key, Count = kv.Value })
             .ToList();
     }
 }

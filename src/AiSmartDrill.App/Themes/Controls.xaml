@@ -14,6 +14,8 @@
     <Style TargetType="Window">
         <Setter Property="Background" Value="{DynamicResource Brush.Background}" />
         <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+        <Setter Property="FontSize" Value="13" />
     </Style>
 
     <Style TargetType="TextBlock">
@@ -28,6 +30,27 @@
         <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
         <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
         <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Margin" Value="0,0,0,12" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="GroupBox">
+                    <StackPanel>
+                        <TextBlock Margin="2,0,0,8"
+                                   FontSize="13"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource Brush.Text}"
+                                   Text="{TemplateBinding Header}" />
+                        <Border Padding="16"
+                                Background="{DynamicResource Brush.Surface}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="{StaticResource Radius.Lg}">
+                            <ContentPresenter />
+                        </Border>
+                    </StackPanel>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <!-- ═══════════════════════════════════════════════════════════
@@ -38,7 +61,8 @@
         <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
         <Setter Property="BorderBrush" Value="{DynamicResource Brush.InputBorder}" />
         <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="Padding" Value="8,6" />
+        <Setter Property="Padding" Value="10,8" />
+        <Setter Property="MinHeight" Value="38" />
         <Setter Property="CaretBrush" Value="{DynamicResource Brush.Text}" />
         <Setter Property="Template">
             <Setter.Value>
@@ -47,7 +71,7 @@
                             Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}"
-                            CornerRadius="{StaticResource Radius.Sm}"
+                            CornerRadius="{StaticResource Radius.Md}"
                             SnapsToDevicePixels="True">
                         <ScrollViewer x:Name="PART_ContentHost"
                                       Focusable="False"
@@ -77,8 +101,9 @@
         <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
         <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
         <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="Padding" Value="14,7" />
-        <Setter Property="Margin" Value="0,0,8,8" />
+        <Setter Property="Padding" Value="14,8" />
+        <Setter Property="Margin" Value="0,0,10,10" />
+        <Setter Property="MinHeight" Value="38" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Template">
             <Setter.Value>
@@ -87,7 +112,7 @@
                             Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}"
-                            CornerRadius="{StaticResource Radius.Sm}"
+                            CornerRadius="{StaticResource Radius.Md}"
                             Padding="{TemplateBinding Padding}"
                             SnapsToDevicePixels="True"
                             RenderTransformOrigin="0.5,0.5">
@@ -163,7 +188,8 @@
         <Setter Property="Background" Value="{DynamicResource Brush.InputBackground}" />
         <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
         <Setter Property="BorderBrush" Value="{DynamicResource Brush.InputBorder}" />
-        <Setter Property="Padding" Value="8,6" />
+        <Setter Property="Padding" Value="10,8" />
+        <Setter Property="MinHeight" Value="38" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ComboBox">
@@ -172,8 +198,8 @@
                                 Background="{DynamicResource Brush.InputBackground}"
                                 BorderBrush="{DynamicResource Brush.InputBorder}"
                                 BorderThickness="1"
-                                CornerRadius="{StaticResource Radius.Sm}"
-                                Padding="8,6">
+                                CornerRadius="{StaticResource Radius.Md}"
+                                Padding="10,8">
                             <Grid>
                                 <!-- 整块区域可点：透明 Toggle 铺满，前景仅展示不参与命中 -->
                                 <ToggleButton x:Name="ToggleButton"
@@ -290,14 +316,14 @@
          主题切换不会干扰。
          ═══════════════════════════════════════════════════════════ -->
     <Style TargetType="TabControl">
-        <Setter Property="Background" Value="{DynamicResource Brush.TabPanelBackground}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
-        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
         <Setter Property="Padding" Value="0" />
     </Style>
 
     <Style TargetType="TabItem">
-        <Setter Property="Padding" Value="16,10" />
+        <Setter Property="Padding" Value="18,11" />
         <Setter Property="Foreground" Value="{DynamicResource Brush.TabItemText}" />
         <Setter Property="Background" Value="{DynamicResource Brush.TabItemBackground}" />
         <Setter Property="Cursor" Value="Hand" />
@@ -379,11 +405,14 @@
         <Setter Property="Background" Value="{DynamicResource Brush.DataGridBackground}" />
         <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
         <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
+        <Setter Property="BorderThickness" Value="1" />
         <Setter Property="RowBackground" Value="{DynamicResource Brush.DataGridBackground}" />
         <Setter Property="AlternatingRowBackground" Value="{DynamicResource Brush.DataGridRowAlt}" />
         <Setter Property="HeadersVisibility" Value="Column" />
         <Setter Property="GridLinesVisibility" Value="Horizontal" />
         <Setter Property="HorizontalGridLinesBrush" Value="{DynamicResource Brush.Border}" />
+        <Setter Property="RowHeight" Value="40" />
+        <Setter Property="ColumnHeaderHeight" Value="42" />
     </Style>
 
     <Style TargetType="DataGridColumnHeader">
